@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from textual.containers import Vertical, Horizontal
+from textual.containers import Vertical, Horizontal, ScrollableContainer
 from textual.screen import Screen
 from textual.widgets import Input, Select, Static, Button, Header, Footer, Label
 
@@ -39,6 +39,13 @@ class SettingsScreen(Screen):
         color: $error;
         height: 1;
     }
+    #body {
+        height: 1fr;
+    }
+    #actions {
+        height: auto;
+        padding: 1 2;
+    }
     """
 
     def __init__(self, config_dir, data_dir):
@@ -50,39 +57,43 @@ class SettingsScreen(Screen):
     def compose(self):
         yield Header()
         yield Label("Settings", id="title")
-        yield Vertical(
-            Label("Storage directory", classes="field-label"),
-            Input(id="config_dir", placeholder="e.g. C:\\Users\\me\\abackup"),
-            Static("Where jobs, settings and logs are stored. Changing it moves all data.", classes="field-hint"),
-            classes="field",
+        yield ScrollableContainer(
+            Vertical(
+                Label("Storage directory", classes="field-label"),
+                Input(id="config_dir", placeholder="e.g. C:\\Users\\me\\abackup"),
+                Static("Where jobs, settings and logs are stored. Changing it moves all data.", classes="field-hint"),
+                classes="field",
+            ),
+            Vertical(
+                Label("Zip compression level (0-9)", classes="field-label"),
+                Input(id="zip_level", placeholder="0 = store, 9 = max, default 6"),
+                Static("Used by the 'zip' backup method.", classes="field-hint"),
+                classes="field",
+            ),
+            Vertical(
+                Label("Max concurrent workers", classes="field-label"),
+                Input(id="workers", placeholder="default 4"),
+                Static("How many jobs run at once with 'Run all jobs'.", classes="field-hint"),
+                classes="field",
+            ),
+            Vertical(
+                Label("Log level", classes="field-label"),
+                Select(_LOG_LEVELS, id="log_level", prompt="Log level"),
+                classes="field",
+            ),
+            Vertical(
+                Label("Default destination (optional)", classes="field-label"),
+                Input(id="default_dest", placeholder="pre-filled for new jobs"),
+                Static("Used as the destination when creating a new job.", classes="field-hint"),
+                classes="field",
+            ),
+            Static("", id="error"),
+            id="body",
         )
-        yield Vertical(
-            Label("Zip compression level (0-9)", classes="field-label"),
-            Input(id="zip_level", placeholder="0 = store, 9 = max, default 6"),
-            Static("Used by the 'zip' backup method.", classes="field-hint"),
-            classes="field",
-        )
-        yield Vertical(
-            Label("Max concurrent workers", classes="field-label"),
-            Input(id="workers", placeholder="default 4"),
-            Static("How many jobs run at once with 'Run all jobs'.", classes="field-hint"),
-            classes="field",
-        )
-        yield Vertical(
-            Label("Log level", classes="field-label"),
-            Select(_LOG_LEVELS, id="log_level", prompt="Log level"),
-            classes="field",
-        )
-        yield Vertical(
-            Label("Default destination (optional)", classes="field-label"),
-            Input(id="default_dest", placeholder="pre-filled for new jobs"),
-            Static("Used as the destination when creating a new job.", classes="field-hint"),
-            classes="field",
-        )
-        yield Static("", id="error")
         yield Horizontal(
             Button("Save", id="save", variant="primary"),
             Button("Cancel", id="cancel"),
+            id="actions",
         )
         yield Footer()
 

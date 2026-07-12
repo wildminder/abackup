@@ -349,6 +349,35 @@ async def test_settings_fields_are_labeled(tmp_config, tmp_data):
             assert expected in labels
 
 
+async def test_settings_actions_visible_above_footer(tmp_config, tmp_data):
+    """Regression: Save/Cancel must not be clipped behind the docked Footer.
+
+    The field groups live inside a ScrollableContainer (#body); the action
+    buttons (#actions) must be a sibling of that container (not nested in it)
+    and rendered within the viewport, above the Footer.
+    """
+    from textual.containers import ScrollableContainer, Horizontal
+    from textual.widgets import Footer
+
+    save_settings(Settings(first_run_completed=True), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(tmp_config, tmp_data))
+        await pilot.pause()
+
+        body = app.screen.query_one("#body", ScrollableContainer)
+        actions = app.screen.query_one("#actions", Horizontal)
+        footer = app.screen.query_one(Footer)
+
+        # Buttons are NOT inside the scroll area.
+        assert actions not in list(body.walk_children())
+        # Buttons render above the footer and within the screen height.
+        assert actions.region.bottom <= footer.region.y
+        assert actions.region.bottom <= app.screen.size.height
+        assert app.screen.query_one("#save", Button).visible
+        assert app.screen.query_one("#cancel", Button).visible
+
+
 async def test_app_resolves_default_config_dir(tmp_data):
     # No --config-dir: the app must resolve a concrete config dir on mount
     # (previously it stayed None and broke Settings save).
