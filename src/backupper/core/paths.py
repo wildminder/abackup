@@ -101,3 +101,82 @@ def shorten_path(
         return name[: max_len - 1] + "…"
     keep = max_len - len(name) - 1  # room for "…" + basename
     return f"{text[:keep]}…{name}"
+
+
+def shorten_display_path(path: str | Path, max_len: int = 50) -> str:
+    """Compact a full path for display, eliding the middle.
+
+    Keeps the drive (if any), the first folder, and the last component,
+    inserting ``…`` in the middle, e.g. ``C:\\Users\\…\\abackup``. If the
+    result is still longer than ``max_len`` the last component is truncated.
+    Short paths are returned unchanged. The original separator style
+    (``\\`` vs ``/``) is preserved.
+    """
+    text = str(path)
+    if len(text) <= max_len:
+        return text
+    sep = "\\" if "\\" in text else "/"
+    is_unc = text.startswith("\\\\") or text.startswith("//")
+    parts = [p for p in text.split(sep) if p != ""]
+    if len(parts) <= 2 and not is_unc:
+        return text[: max_len - 1] + "…"
+
+    # head = drive/root + first folder; tail = last component.
+    if is_unc and len(parts) >= 2:
+        head = sep + sep + parts[0] + sep + parts[1]
+        tail = parts[-1] if len(parts) >= 3 else ""
+    elif len(parts[0]) == 2 and parts[0].endswith(":"):
+        # Windows drive, e.g. "C:".
+        head = parts[0] + (sep + parts[1] if len(parts) > 1 else "")
+        tail = parts[-1]
+    elif text.startswith(sep):
+        # POSIX absolute path.
+        head = sep + parts[0]
+        tail = parts[-1]
+    else:
+        # Relative path.
+        head = parts[0]
+        tail = parts[-1]
+
+    if not tail:
+        return text[: max_len - 1] + "…"
+    candidate = f"{head}{sep}…{sep}{tail}"
+    if len(candidate) <= max_len:
+        return candidate
+
+    # Still too long: drop the first folder, keep only drive/root + … + tail.
+    if is_unc and len(parts) >= 2:
+        head = sep + sep + parts[0] + sep
+    elif len(parts[0]) == 2 and parts[0].endswith(":"):
+        head = parts[0] + sep
+    elif text.startswith(sep):
+        head = sep
+    else:
+        head = ""
+    prefix = head
+    candidate = f"{prefix}…{sep}{tail}"
+    if len(candidate) <= max_len:
+        return candidate
+
+    # Last resort: truncate the tail itself.
+    room = max_len - len(prefix) - len(sep) - 1  # 1 for the "…"
+    if room < 1:
+        return text[: max_len - 1] + "…"
+    return f"{prefix}…{sep}{tail[:room]}"
+
+
+def format_job_label(
+    name: str,
+    method: str,
+    source: str,
+    destination: str,
+    max_len: int = 50,
+) -> str:
+    """Build the job list label: ``name [method]: source -> destination``.
+
+    ``source`` and ``destination`` are elided in the middle (keeping drive,
+    first folder and last component) when longer than ``max_len``.
+    """
+    src = shorten_display_path(source, max_len)
+    dst = shorten_display_path(destination, max_len)
+    return f"{name} [{method}]: {src} -> {dst}"

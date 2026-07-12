@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from textual.widgets import Input, RadioButton, Static, Button, ProgressBar, ListView
+from textual.widgets import Input, RadioButton, Static, Button, ProgressBar, ListView, Label
 
 from abackup.cli import ABackupApp
 from abackup.config import load_jobs, load_settings, save_jobs, save_settings
@@ -98,6 +98,37 @@ async def test_main_menu_shows_empty_state(tmp_config, tmp_data):
         status = app.screen.query_one("#status", Static)
         assert "No jobs yet" in str(status.render())
         assert len(app.screen.query_one("#jobs", ListView).children) == 0
+
+
+async def test_main_menu_job_label_includes_source_and_destination(
+    tmp_config, tmp_data
+):
+    # The job list shows "name [method]: source -> destination", eliding
+    # over-long paths in the middle (keeping drive + first + last segment).
+    job = BackupJob(
+        source=(
+            "C:/Users/art/Documents/Projects/abackup/with/a/very/long/source/path"
+        ),
+        destination=(
+            "D:/Backups/Archive/Projects/abackup/with/a/very/long/dest/path"
+        ),
+        method="7z",
+        name="Docs",
+    )
+    save_jobs([job], tmp_config)
+    save_settings(Settings(), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        list_view = app.screen.query_one("#jobs", ListView)
+        labels = [str(w.render()) for w in list_view.query(Label)]
+        assert labels
+        text = labels[0]
+        assert "Docs [7z]:" in text
+        assert "->" in text
+        # Long paths are elided in the middle, not shown in full.
+        assert "Projects/abackup/with" not in text
+        assert "Archive/Projects/abackup/with" not in text
 
 
 async def test_run_job_screen_updates_status(

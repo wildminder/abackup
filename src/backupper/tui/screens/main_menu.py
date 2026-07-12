@@ -10,6 +10,7 @@ from textual.widgets import ListView, ListItem, Label, Button, Header, Footer, S
 
 from abackup.config import load_jobs, save_jobs
 from abackup.core.jobs import remove_job
+from abackup.core.paths import format_job_label
 
 
 class MainMenuScreen(Screen):
@@ -42,7 +43,13 @@ class MainMenuScreen(Screen):
         list_view.clear()
         for j in jobs:
             list_view.append(
-                ListItem(Label(f"{j.name} [{j.method.value}] -> {j.destination}"))
+                ListItem(
+                    Label(
+                        format_job_label(
+                            j.name, j.method.value, j.source, j.destination
+                        )
+                    )
+                )
             )
         status = self.query_one("#status", Static)
         status.update("No jobs yet. Add one." if not jobs else "")

@@ -10,6 +10,8 @@ from abackup.core.paths import (
     jobs_file_path,
     default_config_dir,
     shorten_path,
+    shorten_display_path,
+    format_job_label,
 )
 
 
@@ -106,3 +108,79 @@ def test_shorten_path_basename_too_long_gets_elided():
 def test_shorten_path_short_unchanged():
     # Short path under root is returned unchanged (relative form).
     assert shorten_path("C:/root/sub/file.txt", "C:/root", max_len=40) == "sub/file.txt"
+
+
+def test_shorten_display_path_short_unchanged():
+    assert shorten_display_path("C:/Users/art/abackup") == "C:/Users/art/abackup"
+    assert shorten_display_path("abackup") == "abackup"
+
+
+def test_shorten_display_path_windows_drive_first_last():
+    # Long Windows path: keep drive + first folder + last component.
+    long = "C:/Users/art/Documents/Projects/abackup/with/a/very/long/path/that/exceeds"
+    out = shorten_display_path(long, max_len=50)
+    assert len(out) <= 50
+    assert out.startswith("C:/Users")
+    assert out.endswith("…/exceeds")
+    assert "Documents" not in out
+    assert "abackup" not in out  # 'abackup' is not the last component here
+
+
+def test_shorten_display_path_windows_backslash():
+    long = "C:\\Users\\user\\Documents\\Projects\\abackup\\deep\\file.txt"
+    out = shorten_display_path(long, max_len=50)
+    assert "\\" in out  # original separator preserved
+    assert out.startswith("C:\\Users")
+    assert out.endswith("…\\file.txt")
+
+
+def test_shorten_display_path_posix_absolute():
+    long = "/home/user/Documents/Projects/abackup/deep/file.txt"
+    out = shorten_display_path(long, max_len=50)
+    assert out.startswith("/home")
+    assert out.endswith("…/file.txt")
+
+
+def test_shorten_display_path_relative():
+    long = "Users/art/Documents/Projects/abackup/deep/file.txt"
+    out = shorten_display_path(long, max_len=50)
+    assert out.startswith("Users")
+    assert out.endswith("…/file.txt")
+
+
+def test_shorten_display_path_unc():
+    long = "//server/share/Projects/abackup/deep/file.txt"
+    out = shorten_display_path(long, max_len=30)
+    assert out.startswith("//server/share")
+    assert out.endswith("…/file.txt")
+
+
+def test_shorten_display_path_still_too_long_truncates_tail():
+    # Even after dropping the first folder, head + "…" + tail exceeds
+    # max_len, so the (very long) last component itself is truncated.
+    long = "C:/Users/art/" + ("a" * 5) + "/" + ("b" * 40)
+    out = shorten_display_path(long, max_len=30)
+    assert len(out) <= 30
+    assert out.startswith("C:/…")
+    assert "…" in out
+
+
+def test_format_job_label_basic():
+    label = format_job_label(
+        "Docs", "7z", "C:/Users/art/Documents", "D:/Backups"
+    )
+    assert label == "Docs [7z]: C:/Users/art/Documents -> D:/Backups"
+
+
+def test_format_job_label_elides_long_paths():
+    src = "C:/Users/art/Documents/Projects/abackup/with/a/very/long/source/path"
+    dst = "D:/Backups/Archive/Projects/abackup/with/a/very/long/dest/path"
+    label = format_job_label("Docs", "copy", src, dst, max_len=40)
+    assert label.startswith("Docs [copy]: ")
+    assert "->" in label
+    # Both long paths are elided (no raw long segment remains).
+    assert "Documents/Projects" not in label
+    assert "Archive/Projects" not in label
+    src_part, dst_part = label.split("->", 1)
+    assert len(src_part) <= len("Docs [copy]: ") + 40
+    assert len(dst_part.strip()) <= 40
