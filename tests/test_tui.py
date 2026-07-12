@@ -290,3 +290,44 @@ async def test_settings_fields_are_labeled(tmp_config, tmp_data):
             "Default destination (optional)",
         ]:
             assert expected in labels
+
+
+async def test_app_resolves_default_config_dir(tmp_data):
+    # No --config-dir: the app must resolve a concrete config dir on mount
+    # (previously it stayed None and broke Settings save).
+    app = ABackupApp(data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.config_dir is not None
+        # The resolved dir is propagated to whichever screen is shown
+        # (FirstRunScreen on a fresh install, MainMenuScreen otherwise).
+        assert app.screen.config_dir == app.config_dir
+
+
+async def test_settings_save_from_default_config_dir(tmp_data, tmp_path):
+    app = ABackupApp(data_dir=tmp_data)
+    new_dir = tmp_path / "relocated"
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(SettingsScreen(app.config_dir, tmp_data))
+        await pilot.pause()
+        app.screen.query_one("#config_dir", Input).value = str(new_dir)
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+        assert (new_dir / "settings.json").exists()
+        assert app.config_dir == str(new_dir)
+
+
+async def test_settings_save_with_none_config_dir_uses_app(tmp_data, tmp_path):
+    # Defensive fallback: if a screen is given config_dir=None, it must fall
+    # back to the app's resolved config dir instead of crashing on Path(None).
+    app = ABackupApp(data_dir=tmp_data)
+    new_dir = tmp_path / "relocated2"
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(SettingsScreen(None, None))
+        await pilot.pause()
+        app.screen.query_one("#config_dir", Input).value = str(new_dir)
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+        assert (new_dir / "settings.json").exists()

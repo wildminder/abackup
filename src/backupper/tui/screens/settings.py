@@ -128,7 +128,7 @@ class SettingsScreen(Screen):
             error.update(str(exc))
             return
 
-        old = Path(self.config_dir).resolve()
+        old = Path(self.config_dir or self.app.config_dir).resolve()
         new = Path(config_dir).resolve()
         if new != old:
             relocate_storage(old, new)
