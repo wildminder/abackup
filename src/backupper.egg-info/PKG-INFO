@@ -1,0 +1,94 @@
+Metadata-Version: 2.4
+Name: abackup
+Version: 0.1.0
+Summary: Full-featured CLI backup app with a terminal user interface
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: textual>=0.60
+Requires-Dist: platformdirs>=4.0
+Requires-Dist: rich>=13.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-mock>=3.12; extra == "dev"
+Requires-Dist: pytest-cov>=5.0; extra == "dev"
+Requires-Dist: freezegun>=1.5; extra == "dev"
+
+# ABackup
+
+A full-featured CLI backup application with a proper **terminal user interface (TUI)**
+built with [Textual](https://textual.textualize.io/).
+
+On first run, ABackup interactively asks for:
+
+1. **Source folder** — the local folder to back up.
+2. **Destination folder** — where backups are written.
+3. **Method** — how to back up:
+   - **Direct copy** — mirrors the source tree into the destination.
+   - **Zip archive** — creates `<source_name>_<YYYY-MM-DD>.zip` in the destination.
+
+Jobs and settings are stored as JSON under your OS config directory and survive
+restarts.
+
+## Install
+
+```bash
+# from the project root (requires Python 3.11+)
+call source .venv/bin/activate
+uv pip install -e .
+```
+
+## Usage
+
+Launch the app (opens the TUI):
+
+```bash
+abackup
+# or
+python -m abackup
+```
+
+### Command-line flags
+
+| Flag | Description |
+|------|-------------|
+| `--version` | Print version and exit. |
+| `--config-dir DIR` | Override the config directory (useful for portable / automated use). |
+| `--data-dir DIR` | Override the data directory (logs, manifests). |
+| `--reset` | Reset the first-run flag so the setup wizard shows again (requires `--config-dir`). |
+
+Example (portable / automated):
+
+```bash
+abackup --config-dir ./my-config --data-dir ./my-data
+abackup --reset --config-dir ./my-config
+```
+
+## Storage
+
+- **Settings:** `<config>/settings.json` (first-run flag, defaults).
+- **Jobs:** `<config>/jobs.json` (array of backup jobs).
+- **Run logs:** `<data>/logs/<job_id>.jsonl`.
+- **Manifests:** `<data>/manifests/<job_id>.json`.
+
+All writes are atomic (temp file + `os.replace`).
+
+## Development & tests
+
+```bash
+call source .venv/bin/activate
+uv pip install -e ".[dev]"
+pytest
+# with coverage gate
+pytest --cov=src/abackup --cov-fail-under=90
+```
+
+## Architecture
+
+- `abackup/core/*` — framework-agnostic, fully unit-tested backup logic.
+- `abackup/models.py` — `Settings` / `BackupJob` / `BackupMethod`.
+- `abackup/config.py` — atomic JSON persistence.
+- `abackup/tui/*` — Textual screens (first-run wizard, main menu, run-job).
+- `abackup/cli.py` — entry point and flags.
+
+Determinism: timestamps are injectable, IDs use `uuid5` (not random), and zip
+output is byte-reproducible.
