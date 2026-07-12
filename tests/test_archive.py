@@ -115,3 +115,62 @@ def test_make_zip_cancel_mid_archive(sample_tree, dest_dir, monkeypatch):
         pass
     else:
         raise AssertionError("expected JobCancelled")
+
+
+def test_make_zip_realtime_byte_progress(sample_tree, dest_dir):
+    (sample_tree / "big.txt").write_text("A" * (3 * 1024 * 1024), encoding="utf-8")
+    seen = []
+    make_zip(
+        sample_tree,
+        dest_dir,
+        when=date(2026, 7, 12),
+        on_progress=lambda p: seen.append(p),
+    )
+    assert len(seen) > 1
+    bytes_seq = [p.bytes_done for p in seen]
+    assert bytes_seq == sorted(bytes_seq)
+    assert seen[-1].bytes_done == seen[-1].bytes_total
+    assert seen[-1].phase == "zipping"
+
+
+def test_make_zip_cancel_stops_progress(sample_tree, dest_dir, monkeypatch):
+    import builtins
+
+    import abackup.core.archive as archive_mod
+
+    for i in range(20):
+        (sample_tree / f"f{i:02d}.txt").write_text(f"content-{i}", encoding="utf-8")
+    cancel = threading.Event()
+    real_open = builtins.open
+    first = {}
+
+    def fake_open(path, *args, **kwargs):
+        f = real_open(path, *args, **kwargs)
+        if not first.get("done") and str(path).endswith(".txt"):
+            orig_read = f.read
+
+            def read(n=-1):
+                data = orig_read(n)
+                cancel.set()
+                first["done"] = True
+                return data
+
+            f.read = read
+        return f
+
+    monkeypatch.setattr(archive_mod, "open", fake_open, raising=False)
+    seen = []
+    try:
+        make_zip(
+            sample_tree,
+            dest_dir,
+            when=date(2026, 7, 12),
+            cancel=cancel,
+            on_progress=lambda p: seen.append(p),
+        )
+    except JobCancelled:
+        pass
+    else:
+        raise AssertionError("expected JobCancelled")
+    assert seen
+    assert seen[-1].bytes_done < seen[-1].bytes_total

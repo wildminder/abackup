@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from textual.widgets import Input, RadioButton, Static, Button
+from textual.widgets import Input, RadioButton, Static, Button, ProgressBar
 
 from abackup.cli import ABackupApp
 from abackup.config import load_jobs, load_settings, save_jobs, save_settings
@@ -317,6 +317,148 @@ async def test_run_all_cancel_button_terminates_jobs(tmp_config, tmp_data, tmp_p
         app.screen.query_one("#back", Button).press()
         await pilot.pause()
         assert isinstance(app.screen, MainMenuScreen)
+
+
+async def test_run_job_screen_shows_realtime_progress(tmp_config, tmp_data, monkeypatch):
+    from abackup.core.backup import BackupResult
+    from abackup.core.progress import Progress, PHASE_DONE, STATUS_SUCCESS
+    from abackup.tui.screens.run_job import RunJobScreen
+    import abackup.tui.screens.run_job as rj_mod
+
+    job = BackupJob(source="C:/x", destination="D:/y", method="copy", name="demo")
+
+    def fake_run_job(
+        j,
+        *,
+        config_dir=None,
+        data_dir=None,
+        on_progress=None,
+        clock=None,
+        zip_compression_level=6,
+        cancel=None,
+    ):
+        # Scripted realtime sequence: 0% (no file yet) -> 100% (mid.txt).
+        on_progress(
+            Progress(
+                job_id=j.id,
+                files_total=2,
+                files_done=0,
+                bytes_total=100,
+                bytes_done=0,
+                current_file="",
+                phase="copying",
+            )
+        )
+        on_progress(
+            Progress(
+                job_id=j.id,
+                files_total=2,
+                files_done=2,
+                bytes_total=100,
+                bytes_done=100,
+                current_file="mid.txt",
+                phase=PHASE_DONE,
+                status=STATUS_SUCCESS,
+            )
+        )
+        return BackupResult(j.id, "copy", "success", {}, None, None, j)
+
+    monkeypatch.setattr(rj_mod, "run_job", fake_run_job)
+
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(RunJobScreen(tmp_config, tmp_data, job))
+        await pilot.pause()
+        await app.screen._worker.wait()
+        await pilot.pause()
+        # Progress bar reached 100%.
+        assert app.screen.query_one("#progress", ProgressBar).progress == 100
+        # Current-file label reflected the mid-file step.
+        assert "mid.txt" in str(app.screen.query_one("#current", Static).render())
+        # Counts line shows completed files.
+        assert "2/2" in str(app.screen.query_one("#counts", Static).render())
+        # Result shown and Back enabled.
+        assert "success" in str(app.screen.query_one("#result", Static).render())
+        assert app.screen.query_one("#back", Button).disabled is False
+
+
+async def test_run_all_screen_shows_realtime_progress(tmp_config, tmp_data, monkeypatch):
+    from abackup.core.backup import BackupResult
+    from abackup.core.progress import (
+        Progress,
+        PHASE_COPYING,
+        PHASE_DONE,
+        STATUS_SUCCESS,
+    )
+    from abackup.tui.screens.run_all import RunAllScreen
+    import abackup.tui.screens.run_all as ra_mod
+
+    jobs = [
+        BackupJob(source="C:/x", destination="D:/y", method="copy", name="jobA"),
+        BackupJob(source="C:/x", destination="D:/y", method="copy", name="jobB"),
+    ]
+    save_jobs(jobs, tmp_config)
+    save_settings(Settings(first_run_completed=True), tmp_config)
+
+    def fake_run_jobs_batch(
+        jobs,
+        *,
+        config_dir=None,
+        data_dir=None,
+        max_workers=4,
+        on_job_done=None,
+        on_progress=None,
+        clock=None,
+        zip_compression_level=None,
+        cancel=None,
+    ):
+        for j in jobs:
+            on_progress(
+                j.id,
+                Progress(
+                    job_id=j.id,
+                    files_total=1,
+                    files_done=0,
+                    bytes_total=100,
+                    bytes_done=0,
+                    current_file="",
+                    phase=PHASE_COPYING,
+                ),
+            )
+            on_progress(
+                j.id,
+                Progress(
+                    job_id=j.id,
+                    files_total=1,
+                    files_done=1,
+                    bytes_total=100,
+                    bytes_done=100,
+                    current_file="f.txt",
+                    phase=PHASE_DONE,
+                    status=STATUS_SUCCESS,
+                ),
+            )
+            on_job_done(j.id, BackupResult(j.id, "copy", "success", {}, None, None, j))
+        return [BackupResult(j.id, "copy", "success", {}, None, None, j) for j in jobs]
+
+    monkeypatch.setattr(ra_mod, "run_jobs_batch", fake_run_jobs_batch)
+
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(RunAllScreen(tmp_config, tmp_data))
+        await pilot.pause()
+        for _ in range(100):
+            await pilot.pause()
+            if app.screen._completed:
+                break
+        assert app.screen._completed
+        # Overall progress reached 100%.
+        assert app.screen.query_one("#progress", ProgressBar).progress == 100
+        # Per-job live lines present and at 100%.
+        jobs_text = str(app.screen.query_one("#jobs", Static).render())
+        assert "jobA" in jobs_text and "jobB" in jobs_text
+        assert "100%" in jobs_text
+        assert app.screen.query_one("#back", Button).disabled is False
 
 
 async def test_settings_cancel_no_change(tmp_config, tmp_data):

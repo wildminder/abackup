@@ -10,10 +10,13 @@ from typing import Callable, List, Optional
 from abackup.config import load_jobs, save_jobs, load_settings
 from abackup.core.backup import BackupResult, run_job
 from abackup.core.jobs import upsert_job
+from abackup.core.progress import Progress, PHASE_CANCELLED, STATUS_CANCELLED
 from abackup.models import BackupJob
 
 # Signature: on_job_done(job_id, result)
 ProgressFn = Callable[[str, BackupResult], None]
+# Signature: on_progress(job_id, progress_snapshot)
+JobProgressFn = Callable[[str, Progress], None]
 
 
 def _cancelled_result(job: "BackupJob", clock) -> BackupResult:
@@ -31,6 +34,7 @@ def run_jobs_batch(
     data_dir=None,
     max_workers: int = 4,
     on_job_done: Optional[ProgressFn] = None,
+    on_progress: Optional[JobProgressFn] = None,
     clock=None,
     zip_compression_level: int | None = None,
     cancel: Optional[threading.Event] = None,
@@ -74,6 +78,15 @@ def run_jobs_batch(
                 results[job.id] = _cancelled_result(job, clock)
                 if on_job_done is not None:
                     on_job_done(job.id, results[job.id])
+                if on_progress is not None:
+                    on_progress(
+                        job.id,
+                        Progress(
+                            job_id=job.id,
+                            phase=PHASE_CANCELLED,
+                            status=STATUS_CANCELLED,
+                        ),
+                    )
                 q.task_done()
                 continue
             try:
@@ -84,6 +97,9 @@ def run_jobs_batch(
                     clock=clock,
                     zip_compression_level=zip_compression_level,
                     cancel=cancel,
+                    on_progress=(
+                        (lambda p: on_progress(job.id, p)) if on_progress else None
+                    ),
                 )
                 if result.updated_job is not None:
                     with lock:

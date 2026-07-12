@@ -236,3 +236,44 @@ def test_cancel_after_first_job_cancels_the_rest(
     assert by_id[jobs[2].id].status == "cancelled"
     assert (tmp_path / "d0").exists()
     assert not (tmp_path / "d1").exists()
+
+
+def test_run_jobs_batch_emits_per_job_progress(
+    sample_tree, tmp_path, tmp_config, tmp_data
+):
+    jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(2)]
+    seen = []
+    run_jobs_batch(
+        jobs,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        max_workers=1,
+        on_progress=lambda jid, p: seen.append((jid, p)),
+    )
+    by_job = {}
+    for jid, p in seen:
+        by_job.setdefault(jid, []).append(p)
+    # Both jobs reported progress.
+    assert set(by_job) == {j.id for j in jobs}
+    # Each job's progress ends at 100%.
+    for seq in by_job.values():
+        assert seq[-1].percent() == 100
+
+
+def test_run_jobs_batch_cancel_emits_cancelled(
+    sample_tree, tmp_path, tmp_config, tmp_data
+):
+    jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(3)]
+    cancel = threading.Event()
+    cancel.set()
+    seen = []
+    run_jobs_batch(
+        jobs,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        max_workers=2,
+        cancel=cancel,
+        on_progress=lambda jid, p: seen.append((jid, p)),
+    )
+    assert seen
+    assert all(p.status == "cancelled" for _, p in seen)

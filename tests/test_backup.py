@@ -52,7 +52,7 @@ def test_run_job_uses_compression_level(sample_tree, dest_dir, tmp_config, tmp_d
 
     captured = {}
 
-    def fake_make_zip(source, destination, *, when=None, compress_level=6, cancel=None):
+    def fake_make_zip(source, destination, *, when=None, compress_level=6, cancel=None, job_id="", on_progress=None):
         captured["compress_level"] = compress_level
         return Path(destination) / "x.zip"
 
@@ -72,9 +72,9 @@ def test_run_job_cancel_copy_mid_run(sample_tree, dest_dir, tmp_config, tmp_data
     cancel = threading.Event()
     seen = []
 
-    def on_progress(done, total, path):
-        seen.append(path)
-        if len(seen) >= 1:
+    def on_progress(p):
+        seen.append(p)
+        if p.current_file:
             cancel.set()
 
     job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
@@ -89,6 +89,55 @@ def test_run_job_cancel_copy_mid_run(sample_tree, dest_dir, tmp_config, tmp_data
     assert result.status == "cancelled"
     assert result.updated_job.last_status == "cancelled"
     assert result.error == "cancelled"
+
+
+def test_run_job_copy_emits_progress(sample_tree, dest_dir, tmp_config, tmp_data):
+    seen = []
+    job = BackupJob(
+        source=str(sample_tree), destination=str(dest_dir / "out"), method="copy"
+    )
+    run_job(
+        job,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        clock=_clock,
+        on_progress=lambda p: seen.append(p),
+    )
+    assert seen
+    assert seen[-1].status == "success"
+    assert seen[-1].percent() == 100
+    assert seen[-1].bytes_total > 0
+
+
+def test_run_job_zip_emits_progress(sample_tree, dest_dir, tmp_config, tmp_data):
+    seen = []
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="zip")
+    run_job(
+        job,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        clock=_clock,
+        on_progress=lambda p: seen.append(p),
+    )
+    assert any(p.phase == "zipping" for p in seen)
+    assert seen[-1].status == "success"
+    assert seen[-1].percent() == 100
+
+
+def test_run_job_missing_source_emits_failed(sample_tree, dest_dir, tmp_config, tmp_data):
+    seen = []
+    job = BackupJob(
+        source=str(dest_dir / "missing"), destination=str(dest_dir), method="copy"
+    )
+    run_job(
+        job,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        clock=_clock,
+        on_progress=lambda p: seen.append(p),
+    )
+    assert seen[-1].status == "failed"
+    assert seen[-1].phase == "failed"
 
 
 def test_run_job_cancel_zip_mid_run(sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch):

@@ -30,6 +30,9 @@ def test_readme_mentions_commands():
         "--show-settings",
         "zip_compression_level",
         "Cancel",
+        "Realtime progress",
+        "Byte-level",
+        "current file",
     ]:
         assert token in text
 

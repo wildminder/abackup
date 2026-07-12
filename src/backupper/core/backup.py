@@ -11,6 +11,15 @@ from typing import Callable, Optional
 from abackup.core.archive import make_zip
 from abackup.core.copy import copy_tree
 from abackup.core.paths import get_data_dir, ensure_dir
+from abackup.core.progress import (
+    Progress,
+    PHASE_DONE,
+    PHASE_FAILED,
+    PHASE_CANCELLED,
+    STATUS_SUCCESS,
+    STATUS_FAILED,
+    STATUS_CANCELLED,
+)
 from abackup.models import BackupJob, BackupMethod
 from abackup.utils.errors import SourceNotFound, DestinationError, JobCancelled
 from abackup.utils.logging import RunLogger
@@ -58,6 +67,32 @@ def run_job(
     ensure_dir(Path(data_dir) / "logs")
     logger = RunLogger(data_dir, job.id)
 
+    # Forward progress to the caller while remembering the latest snapshot so we
+    # can emit a terminal status (success/failed/cancelled) with accurate totals.
+    last: dict = {}
+
+    def _forward(p: Progress) -> None:
+        last["p"] = p
+        if on_progress is not None:
+            on_progress(p)
+
+    def _terminal(phase: str, status: str) -> None:
+        if on_progress is None:
+            return
+        prev = last.get("p")
+        on_progress(
+            Progress(
+                job_id=job.id,
+                files_total=prev.files_total if prev else 0,
+                files_done=prev.files_done if prev else 0,
+                bytes_total=prev.bytes_total if prev else 0,
+                bytes_done=prev.bytes_done if prev else 0,
+                current_file="",
+                phase=phase,
+                status=status,
+            )
+        )
+
     try:
         if job.method == BackupMethod.ZIP:
             out = make_zip(
@@ -65,14 +100,21 @@ def run_job(
                 job.destination,
                 compress_level=zip_compression_level,
                 cancel=cancel,
+                job_id=job.id,
+                on_progress=_forward,
             )
             summary: dict = {"archive": str(out)}
         else:
             summary = copy_tree(
-                job.source, job.destination, on_progress=on_progress, cancel=cancel
+                job.source,
+                job.destination,
+                job_id=job.id,
+                on_progress=_forward,
+                cancel=cancel,
             )
         status = "success"
     except JobCancelled:
+        _terminal(PHASE_CANCELLED, STATUS_CANCELLED)
         updated = BackupJob(
             **{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "cancelled"}
         )
@@ -81,10 +123,13 @@ def run_job(
         )
     except (SourceNotFound, DestinationError) as exc:
         logger.log("error", {"job_id": job.id, "error": str(exc)})
+        _terminal(PHASE_FAILED, STATUS_FAILED)
         updated = BackupJob(
             **{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "failed"}
         )
         return BackupResult(job.id, job.method.value, "failed", {}, None, str(exc), updated)
+
+    _terminal(PHASE_DONE, STATUS_SUCCESS)
 
     manifest = {
         "job_id": job.id,

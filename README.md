@@ -70,6 +70,24 @@ for copies, during) files, so in-flight jobs stop promptly and any queued jobs
 are marked `cancelled` without running. The summary reports how many jobs
 succeeded, failed, and were cancelled.
 
+### Realtime progress
+
+Both backup methods report progress **in real time** so you can watch a job as
+it runs:
+
+- **Byte-level progress** — the source tree is pre-scanned to compute the total
+  size, then each 1 MiB chunk updates the progress bar smoothly (no more
+  "0% → 100%" jumps on large files).
+- **Current file + counts** — the run-job screen shows the file being copied or
+  zipped plus `Files N/M · X/Y MB`.
+- **Per-job + overall** — the run-all screen shows an aggregate overall bar
+  (summed bytes across all concurrent jobs) and a live line per job with its
+  percentage and current file.
+
+Progress is emitted from the worker threads and marshalled onto the UI thread,
+so it never blocks cancellation: pressing **Cancel** still aborts all jobs
+promptly.
+
 ### Settings
 
 Open the **Settings** screen from the main menu to tune global options:
