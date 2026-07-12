@@ -1,5 +1,14 @@
 # Plan: Use 7-Zip by default when available (stdlib zipfile fallback)
 
+> **Decision updated (2026-07-12):** The original plan preferred the *system 7-Zip
+> binary* with stdlib `zipfile` as fallback. Per user direction we flipped the
+> strategy: the **py7zr** pure-Python library is now the **primary** 7z engine
+> (no external binary required, works everywhere, emits per-file progress), the
+> **system 7-Zip binary** is the **fallback** when py7zr is unavailable, and the
+> stdlib `zipfile` writer remains the **last resort** (deterministic `.zip`).
+> `py7zr>=1.0` was added to `pyproject.toml` dependencies. The `prefer_7z`
+> setting (default `True`) still lets users force the deterministic `.zip` path.
+
 ## Feasibility
 Yes. The "Zip archive" method currently calls `make_zip` (stdlib `zipfile`) from
 `backup.py`. We can keep that as a **fallback** and, when a 7-Zip binary is

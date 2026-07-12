@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 
 from abackup.core import compression
-from abackup.core.compression import find_7z, make_archive, make_7z
+from abackup.core.compression import (
+    find_7z,
+    make_archive,
+    make_7z,
+    make_7z_py7zr,
+)
 from abackup.utils.errors import JobCancelled
 
 
@@ -28,22 +33,32 @@ def test_find_7z_found_in_common_path(monkeypatch, tmp_path):
     assert find_7z() == str(exe)
 
 
-def test_make_archive_falls_back_to_zip_when_no_7z(monkeypatch, sample_tree, dest_dir):
-    monkeypatch.setattr(compression, "find_7z", lambda: None)
-    out = make_archive(sample_tree, dest_dir, when=date(2026, 7, 12))
-    assert out.suffix == ".zip"
+def test_have_py7zr_reflects_import(monkeypatch):
+    monkeypatch.setattr(compression, "py7zr", None)
+    assert compression._have_py7zr() is False
+    monkeypatch.undo()
+    assert compression._have_py7zr() is True
+
+
+def test_make_archive_uses_py7zr_when_available(sample_tree, dest_dir):
+    # py7zr is importable in the test env, so it is the primary engine.
+    out = make_archive(sample_tree, dest_dir, when=date(2026, 7, 12), compress_level=6)
+    assert out.suffix == ".7z"
     assert out.exists()
+    # The archive must be a real, readable 7z produced by py7zr.
+    import py7zr
+
+    with py7zr.SevenZipFile(out, "r") as zf:
+        names = {n for n in zf.getnames()}
+    assert "a/f1.txt" in names
+    assert "b.txt" in names
 
 
-def test_make_archive_forces_zip_when_prefer_7z_false(monkeypatch, sample_tree, dest_dir):
-    monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
-    out = make_archive(
-        sample_tree, dest_dir, when=date(2026, 7, 12), prefer_7z=False
-    )
-    assert out.suffix == ".zip"
-
-
-def test_make_archive_uses_7z_when_available(monkeypatch, sample_tree, dest_dir):
+def test_make_archive_falls_back_to_system_7z_when_py7zr_missing(
+    monkeypatch, sample_tree, dest_dir
+):
+    # Simulate py7zr being unavailable; the system binary becomes the fallback.
+    monkeypatch.setattr(compression, "py7zr", None)
     monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
 
     captured = {}
@@ -67,6 +82,44 @@ def test_make_archive_uses_7z_when_available(monkeypatch, sample_tree, dest_dir)
     assert out.exists()
     assert "-t7z" in captured["cmd"]
     assert "-mx6" in captured["cmd"]
+
+
+def test_make_archive_falls_back_to_zip_when_no_7z(monkeypatch, sample_tree, dest_dir):
+    # Neither py7zr nor a system binary -> deterministic stdlib zip.
+    monkeypatch.setattr(compression, "py7zr", None)
+    monkeypatch.setattr(compression, "find_7z", lambda: None)
+    out = make_archive(sample_tree, dest_dir, when=date(2026, 7, 12))
+    assert out.suffix == ".zip"
+    assert out.exists()
+
+
+def test_make_archive_forces_zip_when_prefer_7z_false(monkeypatch, sample_tree, dest_dir):
+    monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
+    out = make_archive(
+        sample_tree, dest_dir, when=date(2026, 7, 12), prefer_7z=False
+    )
+    assert out.suffix == ".zip"
+
+
+def test_make_7z_py7zr_produces_valid_archive(sample_tree, dest_dir):
+    out = make_7z_py7zr(sample_tree, dest_dir, when=date(2026, 7, 12), compress_level=6)
+    assert out.suffix == ".7z"
+    assert out.exists()
+    import py7zr
+
+    with py7zr.SevenZipFile(out, "r") as zf:
+        names = set(zf.getnames())
+    assert "a/f1.txt" in names
+    assert "b.txt" in names
+
+
+def test_make_7z_py7zr_cancel_raises(sample_tree, dest_dir):
+    cancel = __import__("threading").Event()
+    cancel.set()
+    with pytest.raises(JobCancelled):
+        make_7z_py7zr(sample_tree, dest_dir, when=date(2026, 7, 12), cancel=cancel)
+    # No archive should have been finalised.
+    assert not list(dest_dir.glob("*.7z"))
 
 
 def test_make_7z_cancel_raises(monkeypatch, sample_tree, dest_dir):

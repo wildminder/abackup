@@ -12,6 +12,7 @@ dependencies = [
     "textual>=0.60",
     "platformdirs>=4.0",
     "rich>=13.0",
+    "py7zr>=1.0",
 ]
 
 [project.optional-dependencies]
