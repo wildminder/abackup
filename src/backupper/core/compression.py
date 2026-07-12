@@ -40,7 +40,19 @@ try:  # pragma: no cover - import guard; the else branch is exercised in tests
 except ImportError:  # pragma: no cover
     py7zr = None  # type: ignore[assignment]
 
-# Common install locations checked when the binary is not on PATH.
+try:  # Windows-only registry access; absent on other platforms.
+    import winreg
+except ImportError:  # pragma: no cover - non-Windows
+    winreg = None  # type: ignore[assignment]
+
+# Candidate 7-Zip executables, in preference order. ``7z.exe`` is the full
+# command-line binary; ``7za``/``7zr`` are the standalone/reduced console
+# builds; ``7zG.exe`` is the GUI-less build that still accepts the same CLI
+# arguments (used only as a last resort to avoid popping a window).
+_7Z_BINARIES = ("7z.exe", "7za.exe", "7zr.exe", "7zG.exe")
+
+# Common install locations checked when the binary is not on PATH and not
+# registered in the Windows registry.
 _COMMON_7Z_PATHS = [
     r"C:\Program Files\7-Zip\7z.exe",
     r"C:\Program Files (x86)\7-Zip\7z.exe",
@@ -55,12 +67,76 @@ def _have_py7zr() -> bool:
     return py7zr is not None
 
 
+def _seven_zip_registry_paths() -> list[str]:
+    """Return 7-Zip install directories registered in the Windows registry.
+
+    7-Zip records its install location under ``SOFTWARE\\7-Zip`` (value
+    ``Path``) in both ``HKLM`` and ``HKCU``, plus the ``WOW6432Node`` mirror
+    on 64-bit systems. Many installs (e.g. portable/custom locations such as
+    ``C:\\WinApp\\Utils\\7-Zip``) are only discoverable this way -- which is
+    exactly why the binary was previously missed and the app fell back to the
+    slow, single-threaded py7zr library.
+    """
+    if winreg is None:  # pragma: no cover - non-Windows
+        return []
+    found: list[str] = []
+    roots = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\7-Zip"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\7-Zip"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\7-Zip"),
+    ]
+    for hive, subkey in roots:
+        try:
+            with winreg.OpenKey(hive, subkey) as key:
+                value, _ = winreg.QueryValueEx(key, "Path")
+        except OSError:
+            continue
+        if value:
+            found.append(str(value))
+    # De-duplicate while preserving order.
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for p in found:
+        if p not in seen:
+            seen.add(p)
+            ordered.append(p)
+    return ordered
+
+
 def find_7z() -> str | None:
-    """Return the path to a 7-Zip binary, or ``None`` if not installed."""
+    """Return the path to a 7-Zip binary, or ``None`` if not installed.
+
+    Discovery order (first hit wins):
+
+    1. ``SEVEN_ZIP_PATH`` / ``7ZIP_PATH`` environment variable (explicit override).
+    2. The system ``PATH`` (``7z`` / ``7za`` / ``7zr``).
+    3. The install directory recorded in the Windows registry (covers custom
+       and portable installs that are not on PATH).
+    4. A handful of well-known hardcoded locations.
+    """
+    # 1. Explicit environment override.
+    env = os.environ.get("SEVEN_ZIP_PATH") or os.environ.get("7ZIP_PATH")
+    if env:
+        base = Path(env)
+        candidates = [base] if base.is_file() else [base / name for name in _7Z_BINARIES]
+        for cand in candidates:
+            if cand.is_file():
+                return str(cand)
+
+    # 2. On PATH.
     for name in ("7z", "7za", "7zr"):
         found = shutil.which(name)
         if found:
             return found
+
+    # 3. Registry-registered install directories (Windows).
+    for install_dir in _seven_zip_registry_paths():
+        for name in _7Z_BINARIES:
+            cand = Path(install_dir) / name
+            if cand.is_file():
+                return str(cand)
+
+    # 4. Common hardcoded locations.
     for candidate in _COMMON_7Z_PATHS:
         if Path(candidate).is_file():
             return candidate
@@ -274,6 +350,13 @@ def make_7z(
     final = dst / name
     fd, tmp = tempfile.mkstemp(dir=str(dst), suffix=".tmp")
     os.close(fd)
+    # 7z's "add" mode refuses to *create* an archive over a pre-existing
+    # file (it would try to append to it and fail), so discard the empty
+    # placeholder that mkstemp just created; 7z will create it fresh.
+    try:
+        os.remove(tmp)
+    except FileNotFoundError:
+        pass
     try:
         files = sorted(
             (p for p in src.rglob("*") if p.is_file()), key=lambda p: p.as_posix()

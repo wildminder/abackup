@@ -191,3 +191,83 @@ The system 7-Zip binary uses **multithreaded, solid** LZMA2 → all cores.
 ## Atomicity / safety
 Only a default-value change in `Settings`. Existing `settings.json` files
 load unchanged (`prefer_py7zr` already a known key).
+
+---
+
+# Addendum 3: `find_7z()` missed the registry-registered 7-Zip → still slow + Cancel dead
+
+## Problem
+After Addendum 2 flipped the default to prefer the system binary, the app
+was **still slow (~5 min)** and **Cancel did nothing**. Root cause:
+`find_7z()` only checked `PATH` + a few hardcoded paths
+(`C:\Program Files\7-Zip\7z.exe`, …), so it returned `None` on
+machines where 7-Zip is installed in a **custom/portable location**.
+The user's install lives at `C:\WinApp\Utils\7-Zip\` — registered in
+the Windows registry under `SOFTWARE\7-Zip` → `Path` — which none
+of our checks covered. With `find_7z() is None`, `make_archive`
+silently fell back to the slow, single-threaded **py7zr** library,
+which also can't be cancelled mid-file (its `zf.write()` blocks per
+file; cancel is only checked *between* files). So the Cancel button had
+no effect and the Python process kept archiving.
+
+## Decision
+Make `find_7z()` **registry-aware** (Windows) plus an env-var override,
+so it discovers the real install automatically:
+1. `SEVEN_ZIP_PATH` / `7ZIP_PATH` env var (explicit override, first).
+2. `PATH` (`7z` / `7za` / `7zr`).
+3. **Windows registry** `SOFTWARE\7-Zip` → `Path` in `HKLM`, `HKCU`,
+   and `WOW6432Node` (covers custom/portable installs). Within an
+   install dir, prefer `7z.exe` > `7za.exe` > `7zr.exe` > `7zG.exe`
+   (the GUI-less build is only a last resort to avoid popping a window).
+4. The original hardcoded common paths (last resort).
+
+This routes 7z jobs to the **multithreaded system binary** (~30 s instead
+of ~5 min) and makes Cancel work, because `make_7z` already
+terminates the subprocess via `proc.terminate()` when the cancel
+`threading.Event` is set.
+
+### `compression.py`
+- New `import winreg` (guarded; `None` on non-Windows).
+- New `_7Z_BINARIES` tuple (preference order above).
+- New `_seven_zip_registry_paths()` helper: reads the `Path` value from
+  the three registry roots, de-duplicates, returns `[]` when `winreg`
+  is unavailable.
+- `find_7z()` rewritten with the 4-step discovery order above.
+
+### Bug fixed as a side effect
+`make_7z` used `tempfile.mkstemp(..., suffix=".tmp")` which
+**pre-creates an empty temp file**. 7z's `a` (add) mode then tried to
+*append to* that invalid existing file and failed (non-zero exit →
+`DestinationError` → job `failed`). This bug was previously **masked**
+because `find_7z()` always returned `None` (py7zr path). Fix: remove
+the empty placeholder (`os.remove(tmp)`, ignore `FileNotFoundError`)
+right after `mkstemp` so 7z creates the archive fresh. (7z uses the
+output name as-given when it already has an extension, so
+`tmpXXXX.tmp` → `tmpXXXX.tmp` matches our later
+`os.replace(tmp, final)`.)
+
+## Tests
+- `test_compression.py`:
+  - `test_find_7z_uses_registry_when_present` (monkeypatch
+    `_seven_zip_registry_paths` → temp dir with a fake `7z.exe`).
+  - `test_find_7z_prefers_registry_binary_over_gui_less` (`7z.exe`
+    wins over `7zG.exe` in the same dir).
+  - `test_find_7z_env_override` (`SEVEN_ZIP_PATH` wins).
+  - `test_seven_zip_registry_paths_reads_winreg` (fake `winreg` reading
+    `Path` from all three roots, de-duplicated).
+  - `test_seven_zip_registry_paths_returns_empty_off_windows`
+    (`winreg is None` → `[]`).
+  - The three pre-existing `find_7z` tests now also stub
+    `_seven_zip_registry_paths` to `[]` so the real machine registry
+    doesn't leak into them.
+- `test_backup.py::test_run_job_seven_zip` now exercises the **real**
+  7-Zip binary end-to-end (previously masked) and asserts `success`.
+
+## Docs
+- `README.md`: note that 7z auto-detects the system binary via the
+  Windows registry (and `SEVEN_ZIP_PATH` override); the binary is
+  multithreaded and ~5–10× faster than py7zr.
+
+## Atomicity / safety
+No storage-format change. `winreg` import is guarded so the code still
+imports on non-Windows; `_seven_zip_registry_paths` returns `[]` there.

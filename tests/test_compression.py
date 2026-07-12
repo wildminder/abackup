@@ -16,12 +16,14 @@ from abackup.utils.errors import JobCancelled
 def test_find_7z_none_when_absent(monkeypatch):
     monkeypatch.setattr(compression.shutil, "which", lambda name: None)
     monkeypatch.setattr(compression, "_COMMON_7Z_PATHS", [])
+    monkeypatch.setattr(compression, "_seven_zip_registry_paths", lambda: [])
     assert find_7z() is None
 
 
 def test_find_7z_found_on_path(monkeypatch):
     monkeypatch.setattr(compression.shutil, "which", lambda name: "/usr/bin/7z")
     monkeypatch.setattr(compression, "_COMMON_7Z_PATHS", [])
+    monkeypatch.setattr(compression, "_seven_zip_registry_paths", lambda: [])
     assert find_7z() == "/usr/bin/7z"
 
 
@@ -30,7 +32,98 @@ def test_find_7z_found_in_common_path(monkeypatch, tmp_path):
     exe.write_text("", encoding="utf-8")
     monkeypatch.setattr(compression.shutil, "which", lambda name: None)
     monkeypatch.setattr(compression, "_COMMON_7Z_PATHS", [str(exe)])
+    monkeypatch.setattr(compression, "_seven_zip_registry_paths", lambda: [])
     assert find_7z() == str(exe)
+
+
+def test_find_7z_uses_registry_when_present(monkeypatch, tmp_path):
+    # 7-Zip is often installed in a custom/portable location that is only
+    # discoverable via the Windows registry (e.g. C:\WinApp\Utils\7-Zip).
+    # find_7z must consult the registry and return that binary.
+    exe = tmp_path / "7z.exe"
+    exe.write_text("", encoding="utf-8")
+    monkeypatch.setattr(compression.shutil, "which", lambda name: None)
+    monkeypatch.setattr(compression, "_COMMON_7Z_PATHS", [])
+    monkeypatch.setattr(
+        compression, "_seven_zip_registry_paths", lambda: [str(tmp_path)]
+    )
+    assert find_7z() == str(exe)
+
+
+def test_find_7z_prefers_registry_binary_over_gui_less(monkeypatch, tmp_path):
+    # Within a registry install dir, the full CLI binary (7z.exe) must win over
+    # the GUI-less 7zG.exe when both exist.
+    cli = tmp_path / "7z.exe"
+    gui = tmp_path / "7zG.exe"
+    cli.write_text("", encoding="utf-8")
+    gui.write_text("", encoding="utf-8")
+    monkeypatch.setattr(compression.shutil, "which", lambda name: None)
+    monkeypatch.setattr(compression, "_COMMON_7Z_PATHS", [])
+    monkeypatch.setattr(
+        compression, "_seven_zip_registry_paths", lambda: [str(tmp_path)]
+    )
+    assert find_7z() == str(cli)
+
+
+def test_find_7z_env_override(monkeypatch, tmp_path):
+    # An explicit SEVEN_ZIP_PATH / 7ZIP_PATH env var takes top priority.
+    exe = tmp_path / "7z.exe"
+    exe.write_text("", encoding="utf-8")
+    monkeypatch.setenv("SEVEN_ZIP_PATH", str(tmp_path))
+    monkeypatch.setattr(compression.shutil, "which", lambda name: None)
+    monkeypatch.setattr(compression, "_COMMON_7Z_PATHS", [])
+    monkeypatch.setattr(compression, "_seven_zip_registry_paths", lambda: [])
+    assert find_7z() == str(exe)
+
+
+def test_seven_zip_registry_paths_reads_winreg(monkeypatch):
+    # The helper must read the "Path" value from HKLM/HKCU/WOW6432Node and
+    # de-duplicate. We swap in a fake `winreg` so the test is hermetic.
+    class _Key:
+        def __init__(self, value):
+            self._value = value
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class _FakeWinreg:
+        HKEY_LOCAL_MACHINE = "HKLM"
+        HKEY_CURRENT_USER = "HKCU"
+        HKEY_WOW64 = "WOW"
+
+        def __init__(self, table):
+            self._table = table
+
+        def OpenKey(self, hive, subkey):
+            key = (hive, subkey)
+            if key not in self._table:
+                raise OSError("missing")
+            return _Key(self._table[key])
+
+        def QueryValueEx(self, key, name):
+            return (key._value, 1)
+
+    fake = _FakeWinreg(
+        {
+            ("HKLM", r"SOFTWARE\7-Zip"): r"C:\WinApp\Utils\7-Zip",
+            ("HKCU", r"SOFTWARE\7-Zip"): r"C:\WinApp\Utils\7-Zip",
+            ("HKLM", r"SOFTWARE\WOW6432Node\7-Zip"): r"C:\Other\7-Zip",
+        }
+    )
+    monkeypatch.setattr(compression, "winreg", fake)
+    assert compression._seven_zip_registry_paths() == [
+        r"C:\WinApp\Utils\7-Zip",
+        r"C:\Other\7-Zip",
+    ]
+
+
+def test_seven_zip_registry_paths_returns_empty_off_windows(monkeypatch):
+    # On non-Windows (no winreg module) the helper must safely return [].
+    monkeypatch.setattr(compression, "winreg", None)
+    assert compression._seven_zip_registry_paths() == []
 
 
 def test_have_py7zr_reflects_import(monkeypatch):

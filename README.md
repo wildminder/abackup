@@ -14,9 +14,11 @@ Use **Add job** to create a job; the add-job form interactively asks for:
     - **Zip archive** — creates `<source_name>_<YYYY-MM-DD>.zip` in the destination
       using Python's `zipfile` (fast, deterministic, no external dependency).
     - **7z archive** — creates `<source_name>_<YYYY-MM-DD>.7z` (LZMA2) in the
-      destination. Compresses better than zip but is slower. The **py7zr** library
-      is used by default; if you disable *Prefer py7zr* in Settings, the (usually
-      faster) system [7-Zip](https://www.7-zip.org/) binary is used instead when
+      destination. Compresses better than zip. By default the app **auto-detects**
+      the installed [7-Zip](https://www.7-zip.org/) binary (via the Windows
+      registry and `PATH`; override with `SEVEN_ZIP_PATH`) and uses it — it is
+      multithreaded and typically 5–10× faster than the pure-Python **py7zr**
+      fallback. Enable *Prefer py7zr* in Settings to force the py7zr library.
       present.
 
 Jobs and settings are stored as JSON under a config directory in your home folder
@@ -111,8 +113,10 @@ Open the **Settings** screen from the main menu to tune global options:
   - **Prefer py7zr** — controls the engine used for **7z** jobs. Disabled by
     default, so 7z jobs use the **multithreaded, much faster** system
     [7-Zip](https://www.7-zip.org/) binary when installed (typically 5–10×
-    quicker than the Python path). Enable it to force the pure-Python **py7zr**
-    library instead (portable fallback; single-threaded and non-solid, so much
+    quicker than the Python path). The binary is located automatically via the
+    Windows registry and `PATH`; set `SEVEN_ZIP_PATH` if it lives elsewhere.
+    Enable this option to force the pure-Python **py7zr** library instead
+    (portable fallback; single-threaded and non-solid, so much
     slower on large trees). The **Zip archive** method is unaffected and
     always uses Python's `zipfile`.
 - **Max workers** — default number of concurrent jobs for *Run all jobs*.
