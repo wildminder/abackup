@@ -40,9 +40,12 @@ def test_have_py7zr_reflects_import(monkeypatch):
     assert compression._have_py7zr() is True
 
 
-def test_make_archive_uses_py7zr_when_available(sample_tree, dest_dir):
-    # py7zr is importable in the test env, so it is the primary engine.
-    out = make_archive(sample_tree, dest_dir, when=date(2026, 7, 12), compress_level=6)
+def test_make_archive_uses_py7zr_when_forced(sample_tree, dest_dir):
+    # When the user forces py7zr (prefer_py7zr=True), the library is used
+    # even though a system binary would otherwise be preferred by default.
+    out = make_archive(
+        sample_tree, dest_dir, when=date(2026, 7, 12), compress_level=6, prefer_py7zr=True
+    )
     assert out.suffix == ".7z"
     assert out.exists()
     # The archive must be a real, readable 7z produced by py7zr.
@@ -52,6 +55,35 @@ def test_make_archive_uses_py7zr_when_available(sample_tree, dest_dir):
         names = {n for n in zf.getnames()}
     assert "a/f1.txt" in names
     assert "b.txt" in names
+
+
+def test_make_archive_prefers_system_binary_by_default(
+    monkeypatch, sample_tree, dest_dir
+):
+    # New default: prefer the (multithreaded, much faster) system 7-Zip binary
+    # when present, without the user having to toggle anything.
+    monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
+    captured = {}
+
+    class FakeProc:
+        def __init__(self, cmd, **kw):
+            captured["cmd"] = cmd
+            Path(cmd[5]).write_bytes(b"7z-archive")
+            self.returncode = 0
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(compression.subprocess, "Popen", FakeProc)
+    out = make_archive(sample_tree, dest_dir, when=date(2026, 7, 12))
+    assert out.suffix == ".7z"
+    assert out.exists()
+    assert "-t7z" in captured["cmd"]
+    # compress_level defaults to 6 -> the binary gets -mx6.
+    assert "-mx6" in captured["cmd"]
 
 
 def test_make_archive_prefers_system_binary_when_prefer_py7zr_false(
@@ -151,6 +183,35 @@ def test_make_7z_py7zr_cancel_raises(sample_tree, dest_dir):
         make_7z_py7zr(sample_tree, dest_dir, when=date(2026, 7, 12), cancel=cancel)
     # No archive should have been finalised.
     assert not list(dest_dir.glob("*.7z"))
+
+
+def test_make_7z_py7zr_uses_preset_and_stays_single_threaded(
+    monkeypatch, sample_tree, dest_dir
+):
+    # py7zr honours the LZMA2 "preset" but must NOT pass "threads"
+    # (its internal compressor rejects it), so it stays single-threaded -- which
+    # is why the multithreaded system binary is preferred by default.
+    captured = {}
+
+    class FakeZip:
+        def __init__(self, path, mode, filters=None):
+            captured["filters"] = filters
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def write(self, f, arcname=None):
+            pass
+
+    monkeypatch.setattr(compression.py7zr, "SevenZipFile", FakeZip)
+    make_7z_py7zr(sample_tree, dest_dir, when=date(2026, 7, 12), compress_level=3)
+    filt = captured["filters"][0]
+    assert filt["id"] == compression.py7zr.FILTER_LZMA2
+    assert filt["preset"] == 3
+    assert "threads" not in filt
 
 
 def test_make_7z_cancel_raises(monkeypatch, sample_tree, dest_dir):

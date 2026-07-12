@@ -102,13 +102,13 @@ class SettingsScreen(Screen):
                     "Prefer py7zr library for 7z (else system 7-Zip binary)",
                     id="prefer_py7zr",
                 ),
-                Static(
-                    "7z jobs use the pure-Python py7zr library by default. Disable "
-                    "to prefer the (usually faster) system 7-Zip binary when "
-                    "installed. The 'zip' method is unaffected and always uses "
-                    "Python's zipfile.",
-                    classes="field-hint",
-                ),
+            Static(
+                "By default 7z jobs use the (multithreaded, much faster) system "
+                "7-Zip binary when installed. Enable this to force the pure-Python "
+                "py7zr library instead (portable fallback, slower). The 'zip' "
+                "method is unaffected and always uses Python's zipfile.",
+                classes="field-hint",
+            ),
                 classes="field",
             ),
             Static("", id="error"),

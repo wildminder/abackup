@@ -134,3 +134,60 @@ Unchanged: already forwards `compress_level` to both `make_7z_py7zr`
 ## Atomicity / safety
 No storage-format change; `seven_zip_compression_level` is a new optional key with
 a safe default, so existing `settings.json` files load unchanged.
+
+---
+
+# Addendum 2: 7z speed — prefer the multithreaded system binary
+
+## Problem
+A real-world folder that the installed **7-Zip binary** compressed in ~30s at
+~80% CPU took our app **~5 min at ~4% CPU**. Root cause: the app
+defaulted to the **py7zr** library, which
+1. compressed **single-threaded** (LZMA2 filter had no `threads`), and
+2. is **non-solid** (one stream per file), so it can't parallelise across
+   files and pays a Python `write`/stat/`relative_to`/progress cost per file.
+The system 7-Zip binary uses **multithreaded, solid** LZMA2 → all cores.
+
+## Decision
+- **Flip the default** `Settings.prefer_py7zr` from `True` → `False`.
+  `make_archive` now prefers the system 7-Zip binary when found
+  (`find_7z()` on PATH or common install dirs), falling back to py7zr
+  only when no binary is available. This is the ~5–10× speedup.
+- **py7zr stays single-threaded.** Its internal compressor routes through
+  CPython's `lzma.LZMACompressor`, which **rejects the LZMA2
+  `"threads"` key** (`ValueError: Invalid filter specifier for LZMA
+  filter`). So the only multithreaded 7z path is the system binary;
+  py7zr remains a portable-but-slow fallback.
+
+### `models.py`
+- `prefer_py7zr: bool = False` (was `True`). `from_dict` legacy
+  `prefer_7z` → `prefer_py7zr` mapping unchanged.
+
+### `compression.make_7z_py7zr` (core/compression.py)
+- Filter unchanged: `{"id": py7zr.FILTER_LZMA2, "preset": compress_level}`
+  (no `threads` — it would raise). Single-threaded, non-solid.
+
+### `compression.make_archive` (core/compression.py)
+- Precedence unchanged in code, but with the new default the **binary branch
+  (`find_7z() is not None`) is taken first** for 7z jobs.
+
+### Settings screen (tui/screens/settings.py)
+- Hint flipped: binary is used by default (faster); enabling the checkbox
+  forces py7zr (portable fallback, single-threaded).
+
+## Tests
+- `test_models.py`: `test_prefer_py7zr_default_false`.
+- `test_compression.py`: `test_make_archive_prefers_system_binary_by_default`
+  (monkeypatch `find_7z` → binary, call without `prefer_py7zr`, assert
+  `-t7z`/`-mx3` cmd); `test_make_archive_uses_py7zr_when_forced`
+  (explicit `prefer_py7zr=True`); `test_make_7z_py7zr_uses_preset_and_stays_single_threaded`
+  (capture filters, assert `preset` set and `threads` absent).
+
+## Docs
+- `README.md`: "Prefer py7zr" now documented as **disabled by default**
+  (binary preferred, multithreaded, 5–10× faster); enabling forces the
+  single-threaded py7zr fallback.
+
+## Atomicity / safety
+Only a default-value change in `Settings`. Existing `settings.json` files
+load unchanged (`prefer_py7zr` already a known key).

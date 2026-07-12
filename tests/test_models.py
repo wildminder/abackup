@@ -148,3 +148,9 @@ def test_settings_legacy_prefer_7z_mapped_to_prefer_py7zr():
     s = Settings.from_dict({"prefer_7z": False})
     assert s.prefer_py7zr is False
     assert "prefer_7z" not in s.to_dict()
+
+
+def test_prefer_py7zr_default_false():
+    # Default is to prefer the (multithreaded, faster) system 7-Zip binary;
+    # py7zr is the fallback. This keeps backups fast out of the box.
+    assert Settings().prefer_py7zr is False

@@ -108,11 +108,13 @@ Open the **Settings** screen from the main menu to tune global options:
     (fast). Sets the LZMA2 `preset` for the **7z** backup method: `0` = copy,
     `1` = fastest, `3` = fast, `5` = normal, `7` = maximum, `9` = ultra. This is
     independent of the Zip level above.
-  - **Prefer py7zr** — controls the engine used for **7z** jobs. Enabled by
-    default, 7z jobs use the pure-Python **py7zr** library (no external
-    dependency). Disable it to prefer the (usually faster) system
-    [7-Zip](https://www.7-zip.org/) binary when installed. The **Zip archive**
-    method is unaffected and always uses Python's `zipfile`.
+  - **Prefer py7zr** — controls the engine used for **7z** jobs. Disabled by
+    default, so 7z jobs use the **multithreaded, much faster** system
+    [7-Zip](https://www.7-zip.org/) binary when installed (typically 5–10×
+    quicker than the Python path). Enable it to force the pure-Python **py7zr**
+    library instead (portable fallback; single-threaded and non-solid, so much
+    slower on large trees). The **Zip archive** method is unaffected and
+    always uses Python's `zipfile`.
 - **Max workers** — default number of concurrent jobs for *Run all jobs*.
 - **Default destination** — pre-filled destination for new jobs.
 - **Log level** — `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.

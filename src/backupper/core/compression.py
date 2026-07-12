@@ -3,10 +3,13 @@
 ``make_archive`` is the single entry point used by the backup orchestrator. When
 7z output is preferred (``prefer_7z``), it uses the following precedence:
 
-1. **py7zr** (pure-Python library) — primary. No external binary required, works
-   everywhere, and lets us emit per-file progress.
-2. **System 7-Zip binary** — fallback when py7zr is somehow unavailable. Shells
-   out to ``7z`` for LZMA2 compression.
+1. **System 7-Zip binary** — primary. Multithreaded LZMA2, so it uses all
+   CPU cores and is dramatically faster than the pure-Python path (typically
+   5-10x). Used whenever a ``7z``/``7za`` binary is found on PATH or in
+   common install locations.
+2. **py7zr** (pure-Python library) — fallback when no binary is available.
+   Single-threaded and non-solid (per-file streams), so it is much
+   slower than the multithreaded binary for large trees.
 3. **stdlib ``zipfile``** — last resort (deterministic ``.zip``), used when 7z is
    disabled or no 7z engine is available.
 """
@@ -74,7 +77,7 @@ def make_archive(
     job_id: str = "",
     on_progress: OptionalProgressCallback = None,
     prefer_7z: bool = True,
-    prefer_py7zr: bool = True,
+    prefer_py7zr: bool = False,
 ) -> Path:
     """Create an archive of ``source`` in ``destination``.
 
@@ -149,9 +152,13 @@ def make_7z_py7zr(
 ) -> Path:
     """Create ``<source_name>_<YYYY-MM-DD>.7z`` in ``destination`` via py7zr.
 
-    The pure-Python py7zr library is the primary 7z engine (no external binary
-    needed). Files are written individually so we can emit per-file progress and
-    honour cancellation between files. ``cancel`` raises ``JobCancelled``.
+    The pure-Python py7zr library is the 7z fallback engine (used when no
+    system 7-Zip binary is available). It is single-threaded and non-solid
+    (one stream per file), so it is much slower than the multithreaded
+    system binary for large trees -- which is why the binary is preferred by
+    default. Files are written one at a time so we can emit per-file
+    progress and honour cancellation between files. ``cancel`` raises
+    ``JobCancelled``.
     """
     if py7zr is None:  # pragma: no cover - guarded by make_archive
         raise DestinationError("py7zr library is not available")
@@ -188,6 +195,10 @@ def make_7z_py7zr(
                 )
             )
 
+        # NOTE: py7zr's internal compressor (CPython lzma.LZMACompressor)
+        # rejects the LZMA2 "threads" key, so py7zr is inherently
+        # single-threaded. The fast multithreaded path is the system 7-Zip
+        # binary, which is why make_archive prefers it by default.
         filters = [{"id": py7zr.FILTER_LZMA2, "preset": compress_level}]
         bytes_done = 0
         files_done = 0

@@ -40,7 +40,7 @@ class Settings:
     max_workers: int = 4
     zip_compression_level: int = 6
     seven_zip_compression_level: int = 3
-    prefer_py7zr: bool = True
+    prefer_py7zr: bool = False
     created_at: str = field(default_factory=lambda: _now().isoformat())
 
     def to_dict(self) -> dict[str, Any]:
