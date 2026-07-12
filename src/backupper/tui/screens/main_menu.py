@@ -25,6 +25,7 @@ class MainMenuScreen(Screen):
         yield Horizontal(
             Button("Add job", id="add", variant="primary"),
             Button("Run selected", id="run"),
+            Button("Run all", id="run_all", variant="success"),
             Button("Delete selected", id="delete", variant="error"),
             Button("Quit", id="quit"),
         )
@@ -52,6 +53,11 @@ class MainMenuScreen(Screen):
             from abackup.tui.screens.first_run import FirstRunScreen
 
             self.app.push_screen(FirstRunScreen(self.config_dir, self.data_dir))
+            return
+        if event.button.id == "run_all":
+            from abackup.tui.screens.run_all import RunAllScreen
+
+            self.app.push_screen(RunAllScreen(self.config_dir, self.data_dir))
             return
         if event.button.id == "quit":
             self.app.exit()

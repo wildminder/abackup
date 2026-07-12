@@ -13,7 +13,17 @@ def test_version_matches_pyproject():
 def test_readme_mentions_commands():
     readme = Path(__file__).resolve().parent.parent / "README.md"
     text = readme.read_text(encoding="utf-8")
-    for token in ["abackup", "--reset", "--config-dir", "Direct copy", "Zip archive"]:
+    for token in [
+        "abackup",
+        "--reset",
+        "--config-dir",
+        "Direct copy",
+        "Zip archive",
+        "Run all",
+        "--run-all",
+        "--workers",
+        "max_workers",
+    ]:
         assert token in text
 
 

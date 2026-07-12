@@ -40,13 +40,28 @@ python -m abackup
 | `--config-dir DIR` | Override the config directory (useful for portable / automated use). |
 | `--data-dir DIR` | Override the data directory (logs, manifests). |
 | `--reset` | Reset the first-run flag so the setup wizard shows again (requires `--config-dir`). |
+| `--run-all` | Run every configured job non-interactively and print a summary (requires `--config-dir`). |
+| `--workers N` | Number of concurrent backup workers for `--run-all` (default: `max_workers` setting). |
 
 Example (portable / automated):
 
 ```bash
 abackup --config-dir ./my-config --data-dir ./my-data
 abackup --reset --config-dir ./my-config
+abackup --run-all --config-dir ./my-config --workers 4
 ```
+
+### Running all jobs
+
+- In the TUI, use the **Run all** button on the main menu to back up every job
+  concurrently (progress + per-job results are shown on the run-all screen).
+- From the CLI, `abackup --run-all --config-dir DIR` runs all jobs and prints a
+  summary without opening the terminal UI.
+
+Jobs run concurrently via a bounded pool of worker threads fed from a queue, so a
+large number of jobs is processed with bounded memory. The worker count is
+controlled by the `max_workers` setting (default `4`) or the `--workers` flag. A
+failing job never stops the others, and each job's status is persisted.
 
 ## Storage
 

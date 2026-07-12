@@ -1,0 +1,33 @@
+........................................................................ [ 88%]
+.........                                                                [100%]
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.13.13-final-0 _______________
+
+Name                                     Stmts   Miss  Cover   Missing
+----------------------------------------------------------------------
+src\abackup\__init__.py                    1      0   100%
+src\abackup\__main__.py                    3      3     0%   1-4
+src\abackup\cli.py                        45      3    93%   59, 74-75
+src\abackup\config.py                     60      6    90%   31-34, 65-66
+src\abackup\core\__init__.py               0      0   100%
+src\abackup\core\archive.py               36      4    89%   55-58
+src\abackup\core\backup.py                46      0   100%
+src\abackup\core\copy.py                  60      4    93%   32-35
+src\abackup\core\discovery.py              6      0   100%
+src\abackup\core\jobs.py                  25      0   100%
+src\abackup\core\paths.py                 26      2    92%   17, 23
+src\abackup\core\runner.py                44      0   100%
+src\abackup\models.py                     66      0   100%
+src\abackup\tui\__init__.py                0      0   100%
+src\abackup\tui\app.py                    20      0   100%
+src\abackup\tui\screens\__init__.py        0      0   100%
+src\abackup\tui\screens\first_run.py      46      3    93%   37, 51-52
+src\abackup\tui\screens\main_menu.py      56      5    91%   63-64, 66-67, 70
+src\abackup\tui\screens\run_all.py        50      0   100%
+src\abackup\tui\screens\run_job.py        35      3    91%   53-56
+src\abackup\utils\__init__.py              0      0   100%
+src\abackup\utils\errors.py                6      0   100%
+src\abackup\utils\logging.py              12      0   100%
+----------------------------------------------------------------------
+TOTAL                                      643     33    95%
+Required test coverage of 90% reached. Total coverage: 94.87%

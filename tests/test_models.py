@@ -47,3 +47,19 @@ def test_job_from_dict_round_trip():
     assert j2.source == j.source
     assert j2.method == j.method
     assert j2.last_status == "success"
+
+
+def test_settings_max_workers_default():
+    assert Settings().max_workers == 4
+
+
+def test_settings_max_workers_round_trip():
+    s = Settings(max_workers=8)
+    assert Settings.from_dict(s.to_dict()).max_workers == 8
+
+
+def test_settings_from_dict_keeps_default_without_field():
+    # Old settings.json (no max_workers) must still load with the default.
+    s = Settings.from_dict({"first_run_completed": True})
+    assert s.max_workers == 4
+    assert s.first_run_completed is True

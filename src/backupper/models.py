@@ -37,6 +37,7 @@ class Settings:
     first_run_completed: bool = False
     default_destination: str | None = None
     log_level: str = "INFO"
+    max_workers: int = 4
     created_at: str = field(default_factory=lambda: _now().isoformat())
 
     def to_dict(self) -> dict[str, Any]:

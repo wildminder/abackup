@@ -7,6 +7,7 @@ from abackup.models import BackupJob, Settings
 from abackup.tui.screens.first_run import FirstRunScreen
 from abackup.tui.screens.main_menu import MainMenuScreen
 from abackup.tui.screens.run_job import RunJobScreen
+from abackup.tui.screens.run_all import RunAllScreen
 
 
 async def test_first_run_wizard_creates_job_and_settings(
@@ -101,3 +102,103 @@ async def test_main_menu_add_button(tmp_config, tmp_data):
         await pilot.click("#add")
         await pilot.pause()
         assert isinstance(app.screen, FirstRunScreen)
+
+
+async def test_main_menu_run_all_button(tmp_config, tmp_data, sample_tree, dest_dir):
+    job = BackupJob(
+        source=str(sample_tree), destination=str(dest_dir), method="copy"
+    )
+    save_jobs([job], tmp_config)
+    save_settings(Settings(first_run_completed=True), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        await pilot.click("#run_all")
+        await pilot.pause()
+        assert isinstance(app.screen, RunAllScreen)
+
+
+async def _wait_run_all(pilot, app, limit: int = 200) -> None:
+    worker = getattr(app.screen, "_worker", None)
+    if worker is not None:
+        await worker.wait()
+    for _ in range(limit):
+        await pilot.pause()
+        if getattr(app.screen, "_completed", False):
+            return
+    raise AssertionError("RunAllScreen did not complete in time")
+
+
+async def test_run_all_screen_completes_all(tmp_config, tmp_data, sample_tree, tmp_path):
+    jobs = [
+        BackupJob(
+            source=str(sample_tree),
+            destination=str(tmp_path / f"out_{i}"),
+            method="copy",
+            name=f"job{i}",
+        )
+        for i in range(3)
+    ]
+    save_jobs(jobs, tmp_config)
+    save_settings(Settings(first_run_completed=True), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        app.push_screen(RunAllScreen(tmp_config, tmp_data))
+        await _wait_run_all(pilot, app)
+        stored = load_jobs(tmp_config)
+        assert len(stored) == 3
+        assert all(j.last_status == "success" for j in stored)
+
+
+async def test_run_all_screen_shows_failure(tmp_config, tmp_data, sample_tree, tmp_path):
+    good = BackupJob(
+        source=str(sample_tree),
+        destination=str(tmp_path / "out_good"),
+        method="copy",
+        name="good",
+    )
+    bad = BackupJob(
+        source=str(tmp_path / "missing"),
+        destination=str(tmp_path / "out_bad"),
+        method="copy",
+        name="bad",
+    )
+    save_jobs([good, bad], tmp_config)
+    save_settings(Settings(first_run_completed=True), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        app.push_screen(RunAllScreen(tmp_config, tmp_data))
+        await _wait_run_all(pilot, app)
+        stored = {j.id: j for j in load_jobs(tmp_config)}
+        assert stored[good.id].last_status == "success"
+        assert stored[bad.id].last_status == "failed"
+
+
+async def test_run_all_screen_empty(tmp_config, tmp_data):
+    save_settings(Settings(first_run_completed=True), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        app.push_screen(RunAllScreen(tmp_config, tmp_data))
+        await pilot.pause()
+        # No jobs -> completes immediately, no worker started.
+        assert app.screen._completed is True
+        assert app.screen._worker is None
+
+
+async def test_run_all_screen_back_button(tmp_config, tmp_data, sample_tree, dest_dir):
+    job = BackupJob(
+        source=str(sample_tree), destination=str(dest_dir / "out"), method="copy"
+    )
+    save_jobs([job], tmp_config)
+    save_settings(Settings(first_run_completed=True), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        app.push_screen(RunAllScreen(tmp_config, tmp_data))
+        await _wait_run_all(pilot, app)
+        await pilot.click("#back")
+        await pilot.pause()
+        assert isinstance(app.screen, MainMenuScreen)

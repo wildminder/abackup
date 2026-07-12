@@ -6,7 +6,8 @@ import argparse
 from pathlib import Path
 
 from abackup import __version__
-from abackup.config import load_settings, save_settings
+from abackup.config import load_jobs, load_settings, save_settings
+from abackup.core.runner import run_jobs_batch
 from abackup.tui.app import ABackupApp
 
 
@@ -22,7 +23,26 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Reset first-run flag so the setup wizard shows again",
     )
+    parser.add_argument(
+        "--run-all",
+        action="store_true",
+        help="Run every configured job (non-interactive) and print a summary",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of concurrent backup workers (default: settings.max_workers)",
+    )
     return parser
+
+
+def _print_batch_summary(results) -> None:
+    success = sum(1 for r in results if r.status == "success")
+    failed = len(results) - success
+    for r in results:
+        print(f"  {r.job_id}: {r.status}")
+    print(f"Completed {len(results)} jobs: {success} success, {failed} failed.")
 
 
 def main(argv=None) -> None:
@@ -33,6 +53,23 @@ def main(argv=None) -> None:
         settings = load_settings(args.config_dir)
         settings.first_run_completed = False
         save_settings(settings, args.config_dir)
+        return
+    if args.run_all:
+        if args.config_dir is None:
+            raise SystemExit("--run-all requires --config-dir")
+        jobs = load_jobs(args.config_dir)
+        if not jobs:
+            print("No jobs configured. Add a job first.")
+            return
+        settings = load_settings(args.config_dir)
+        max_workers = args.workers or settings.max_workers
+        results = run_jobs_batch(
+            jobs,
+            config_dir=args.config_dir,
+            data_dir=args.data_dir,
+            max_workers=max_workers,
+        )
+        _print_batch_summary(results)
         return
     app = ABackupApp(config_dir=args.config_dir, data_dir=args.data_dir)
     app.run()

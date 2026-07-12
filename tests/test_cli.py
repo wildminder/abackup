@@ -1,8 +1,8 @@
 import pytest
 
 from abackup.cli import build_parser, main
-from abackup.config import init_storage, load_settings, save_settings
-from abackup.models import Settings
+from abackup.config import init_storage, load_settings, save_settings, load_jobs, save_jobs
+from abackup.models import BackupJob, Settings
 
 
 def test_version(capsys):
@@ -28,3 +28,53 @@ def test_reset_flips_first_run(tmp_config):
 def test_reset_requires_config_dir():
     with pytest.raises(SystemExit):
         main(["--reset"])
+
+
+def test_cli_run_all_runs_every_job(tmp_config, tmp_data, sample_tree, tmp_path, capsys):
+    jobs = [
+        BackupJob(
+            source=str(sample_tree),
+            destination=str(tmp_path / f"out_{i}"),
+            method="copy",
+            name=f"job{i}",
+        )
+        for i in range(2)
+    ]
+    save_jobs(jobs, tmp_config)
+    save_settings(Settings(first_run_completed=True), tmp_config)
+
+    main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    out = capsys.readouterr().out
+    assert "Completed 2 jobs" in out
+    stored = load_jobs(tmp_config)
+    assert len(stored) == 2
+    assert all(j.last_status == "success" for j in stored)
+
+
+def test_cli_run_all_empty(tmp_config, tmp_data, capsys):
+    save_settings(Settings(first_run_completed=True), tmp_config)
+    main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert "No jobs configured" in capsys.readouterr().out
+
+
+def test_cli_workers_flag(tmp_config, tmp_data, sample_tree, tmp_path, monkeypatch):
+    jobs = [
+        BackupJob(
+            source=str(sample_tree),
+            destination=str(tmp_path / "out"),
+            method="copy",
+            name="job",
+        )
+    ]
+    save_jobs(jobs, tmp_config)
+    save_settings(Settings(first_run_completed=True), tmp_config)
+
+    captured = {}
+
+    def fake_run(jobs, *, config_dir=None, data_dir=None, max_workers=4, on_job_done=None, clock=None):
+        captured["max_workers"] = max_workers
+        return []
+
+    monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
+    main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data, "--workers", "2"])
+    assert captured["max_workers"] == 2
