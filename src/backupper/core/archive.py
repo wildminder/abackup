@@ -8,7 +8,7 @@ import zipfile
 from datetime import date
 from pathlib import Path
 
-from abackup.core.paths import safe_archive_name
+from abackup.core.paths import safe_archive_name, set_hidden
 from abackup.core.progress import (
     Progress,
     PHASE_ZIPPING,
@@ -18,12 +18,13 @@ from abackup.utils.errors import SourceNotFound, DestinationError, JobCancelled
 
 from typing import Callable, Optional
 
-# Staging sub-directory inside the destination. The archive is written here
-# while it is still partial, then atomically moved into the destination root
-# only once it is complete. This keeps a half-written / cancelled file
-# out of the folder the OS shell is displaying, so Explorer's Compressed
-# Folders handler (zipfldr.dll) never tries to preview a broken archive.
-_STAGE_DIR = ".abackup_tmp"
+# Staging directory lives OUTSIDE the destination (in the system temp
+# dir) so a half-written / cancelled file never sits in the folder
+# the OS shell is displaying. The finished archive is then moved into
+# the destination atomically via os.replace, and marked hidden so
+# Explorer's Compressed Folders handler (zipfldr.dll) does not
+# preview / index a large .zip and peg a CPU core.
+_STAGE_PREFIX = "abackup_zip_"
 
 
 def _log(log, level: str, record: dict) -> None:
@@ -63,11 +64,13 @@ def make_zip(
     the next file (and mid-file for the in-progress entry) so a batch can be
     aborted promptly.
 
-    The archive is staged in a hidden ``.abackup_tmp`` sub-directory of
-    ``destination`` and only moved into place (atomically, via ``os.replace``)
+    The archive is staged in the **system temp directory (outside the
+    destination)** and only moved into place (atomically, via ``os.replace``)
     once it is complete. This keeps a partial / cancelled file out of the
     folder the OS shell is displaying, so Explorer's Compressed Folders handler
-    never tries to preview a broken archive. ``log`` (optional) receives
+    never tries to preview a broken archive. The finished archive is then
+    marked **hidden** so Explorer's default view does not preview / index a
+    (possibly large) ``.zip`` and peg a CPU core. ``log`` (optional) receives
     diagnostic records (tmp/final paths and their existence) for troubleshooting.
     """
     src = Path(source)
@@ -81,10 +84,10 @@ def make_zip(
 
     name = safe_archive_name(src.name or "backup", when)
     final = dst / name
-    # Stage in a side directory so a partial/cancelled file never sits
-    # directly in the watched destination root.
-    stage = dst / _STAGE_DIR
-    stage.mkdir(exist_ok=True)
+    # Stage OUTSIDE the destination (system temp) so a partial /
+    # cancelled file never sits in the folder the OS shell is
+    # displaying. Only the finished archive is moved into place.
+    stage = Path(tempfile.mkdtemp(prefix=_STAGE_PREFIX, dir=tempfile.gettempdir()))
     fd, tmp = tempfile.mkstemp(dir=str(stage), suffix=".tmp")
     _log(log, "debug", {"event": "zip_start", "tmp": tmp, "final": str(final)})
     try:
@@ -164,6 +167,9 @@ def make_zip(
                         )
                     )
         os.replace(tmp, final)
+        # Hide the final archive so Explorer's default view does not
+        # preview / index a (possibly large) .zip and peg a CPU core.
+        set_hidden(final)
         _log(
             log,
             "debug",

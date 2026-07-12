@@ -1,4 +1,8 @@
+import ctypes
+import sys
 import threading
+
+import pytest
 from datetime import date
 from pathlib import Path
 from zipfile import ZipFile
@@ -219,3 +223,13 @@ def test_make_zip_success_moves_final_and_cleans_stage(sample_tree, dest_dir):
     assert done, "expected a zip_done diagnostic record"
     assert done[-1]["final_exists"] is True
     assert done[-1]["tmp_exists"] is False
+
+
+def test_make_zip_final_is_hidden_on_windows(sample_tree, dest_dir):
+    out = make_zip(sample_tree, dest_dir, when=date(2026, 7, 12))
+    # The staging dir must not live inside the watched destination.
+    assert not (dest_dir / ".abackup_tmp").exists()
+    if sys.platform != "win32":
+        pytest.skip("windows-only")
+    attrs = ctypes.windll.kernel32.GetFileAttributesW(str(out))
+    assert attrs & 0x2  # FILE_ATTRIBUTE_HIDDEN
