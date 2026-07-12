@@ -18,9 +18,11 @@ Use **Add job** to create a job; the add-job form interactively asks for:
       the installed [7-Zip](https://www.7-zip.org/) binary (via the Windows
       registry and `PATH`; override with `SEVEN_ZIP_PATH`) and uses it — it is
       multithreaded and typically 5–10× faster than the pure-Python **py7zr**
-      fallback. Enable *Prefer py7zr* in Settings to force the py7zr library.
-      7z jobs report **live progress** parsed from 7-Zip's `-bsp2` percentage
-      stream, so the bar moves smoothly during a long archive.
+       fallback. Enable *Prefer py7zr* in Settings to force the py7zr library.
+       7z jobs report **live progress** derived from the growing archive file
+       size (7-Zip buffers its `-bsp2` percentage stream when piped, so the
+       bar is driven by the temp archive's growth instead), so it moves
+       smoothly during a long archive.
       present.
 
 Jobs and settings are stored as JSON under a config directory in your home folder
