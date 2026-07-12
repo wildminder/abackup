@@ -79,7 +79,9 @@ it runs:
   size, then each 1 MiB chunk updates the progress bar smoothly (no more
   "0% → 100%" jumps on large files).
 - **Current file + counts** — the run-job screen shows the file being copied or
-  zipped plus `Files N/M · X/Y MB`.
+  zipped plus `Files N/M · X/Y MB`. Paths are displayed **relative to the backup
+  source** (and elided in the middle if still long), so the UI stays compact
+  instead of showing long absolute paths.
 - **Per-job + overall** — the run-all screen shows an aggregate overall bar
   (summed bytes across all concurrent jobs) and a live line per job with its
   percentage and current file.

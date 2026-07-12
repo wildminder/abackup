@@ -9,6 +9,7 @@ from textual.containers import Horizontal
 from textual.widgets import ProgressBar, Static, Button, RichLog
 
 from abackup.config import load_jobs, load_settings
+from abackup.core.paths import shorten_path
 from abackup.core.progress import Progress
 from abackup.core.runner import run_jobs_batch
 
@@ -68,6 +69,7 @@ class RunAllScreen(Screen):
             return
 
         self._job_names = {j.id: j.name for j in jobs}
+        self._job_sources = {j.id: j.source for j in jobs}
 
         # Keep "Back" disabled until the batch finishes (or is cancelled) so the
         # screen isn't popped while worker threads are still running.
@@ -111,7 +113,7 @@ class RunAllScreen(Screen):
         total_done = 0
         total_bytes = 0
         for jid, prog in self._job_progress.items():
-            label = prog.current_file or prog.phase
+            label = shorten_path(prog.current_file, self._job_sources.get(jid)) or prog.phase
             name = self._job_names.get(jid, jid)
             lines.append(f"{name}: {prog.percent()}% — {label}")
             total_done += prog.bytes_done

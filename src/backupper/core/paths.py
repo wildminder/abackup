@@ -63,3 +63,41 @@ def settings_file_path(config_dir: str | Path) -> Path:
 
 def jobs_file_path(config_dir: str | Path) -> Path:
     return Path(config_dir) / "jobs.json"
+
+
+def shorten_path(
+    path: str | Path | None,
+    root: str | Path | None = None,
+    max_len: int = 40,
+) -> str:
+    """Return a compact, display-friendly form of ``path``.
+
+    - If ``root`` is given and ``path`` lives under it, the root prefix is
+      stripped so only the path *relative to the backup source* is shown
+      (e.g. ``subdir/file.txt`` instead of a long absolute path).
+    - If the (relative or absolute) result is longer than ``max_len``, the
+      middle is elided (``root\\…\\file.txt``) while keeping the basename.
+    - If the path is not under ``root``, the basename is used as a fallback.
+    - Empty/None input returns ``""``.
+    """
+    if not path:
+        return ""
+    text = str(path)
+    base = Path(text)
+    if root:
+        root_text = str(root)
+        # Case-insensitive prefix match (Windows paths).
+        if text.lower().startswith(root_text.lower()):
+            rel = text[len(root_text):].lstrip("\\/")
+            text = rel or base.name
+        else:
+            # Not under the source root -> fall back to the basename only.
+            text = base.name
+    if len(text) <= max_len:
+        return text
+    # Elide the middle, preserving the basename.
+    name = base.name
+    if len(name) >= max_len - 1:
+        return name[: max_len - 1] + "…"
+    keep = max_len - len(name) - 1  # room for "…" + basename
+    return f"{text[:keep]}…{name}"

@@ -9,6 +9,7 @@ from abackup.core.paths import (
     settings_file_path,
     jobs_file_path,
     default_config_dir,
+    shorten_path,
 )
 
 
@@ -56,3 +57,47 @@ def test_safe_archive_name_fallback_empty():
 def test_file_paths(tmp_path):
     assert settings_file_path(tmp_path).name == "settings.json"
     assert jobs_file_path(tmp_path).name == "jobs.json"
+
+
+def test_shorten_path_empty():
+    assert shorten_path("") == ""
+    assert shorten_path(None) == ""
+
+
+def test_shorten_path_relative_to_root():
+    root = "C:/Users/art/Documents"
+    full = "C:/Users/art/Documents/projects/abackup/src/main.py"
+    assert shorten_path(full, root) == "projects/abackup/src/main.py"
+
+
+def test_shorten_path_root_match_case_insensitive():
+    # Windows paths are case-insensitive on the prefix.
+    assert shorten_path("c:/x/y/file.txt", "C:/X") == "y/file.txt"
+
+
+def test_shorten_path_elides_middle_when_long():
+    root = "C:/Users/art/Documents"
+    full = "C:/Users/art/Documents/" + ("a" * 60) + "/file.txt"
+    out = shorten_path(full, root, max_len=40)
+    assert len(out) <= 40
+    assert out.endswith("…file.txt")
+    assert "file.txt" in out
+
+
+def test_shorten_path_not_under_root_uses_basename():
+    full = "D:/elsewhere/deep/nested/really/long/path/file.txt"
+    out = shorten_path(full, "C:/Other", max_len=40)
+    # Not under root -> basename fallback (no leading drive noise).
+    assert out == "file.txt"
+
+
+def test_shorten_path_basename_too_long_gets_elided():
+    name = "x" * 50 + ".txt"
+    out = shorten_path(name, max_len=20)
+    assert len(out) <= 20
+    assert out.endswith("…")
+
+
+def test_shorten_path_short_unchanged():
+    # Short path under root is returned unchanged (relative form).
+    assert shorten_path("C:/root/sub/file.txt", "C:/root", max_len=40) == "sub/file.txt"

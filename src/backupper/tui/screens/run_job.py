@@ -8,6 +8,7 @@ from textual.widgets import ProgressBar, Static, Button
 
 from abackup.config import load_jobs, save_jobs
 from abackup.core.backup import run_job
+from abackup.core.paths import shorten_path
 from abackup.core.progress import Progress
 from abackup.models import BackupJob
 
@@ -34,7 +35,9 @@ class RunJobScreen(Screen):
         def on_progress(p: Progress) -> None:
             self.query_one("#progress", ProgressBar).update(progress=p.percent())
             self.query_one("#current", Static).update(
-                f"Current: {p.current_file}" if p.current_file else ""
+                f"Current: {shorten_path(p.current_file, self.job.source)}"
+                if p.current_file
+                else ""
             )
             mb_done = p.bytes_done / (1024 * 1024)
             mb_total = p.bytes_total / (1024 * 1024)
