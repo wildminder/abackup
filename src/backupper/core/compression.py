@@ -17,9 +17,11 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from datetime import date
 from pathlib import Path
@@ -319,6 +321,18 @@ def make_7z_py7zr(
     return final
 
 
+def _last_7z_pct(segment: bytes) -> int | None:
+    """Extract the trailing compression percentage (``NN%``) from a 7-Zip
+    progress segment, or ``None`` if none is present.
+
+    7-Zip emits progress with ``-bsp2`` as carriage-return-separated
+    segments such as ``b"  0%\\r  50%\\r 100%\\r"``; we only care
+    about the last ``NN%`` marker in each segment.
+    """
+    match = re.search(rb"(\d+)%", segment)
+    return int(match.group(1)) if match else None
+
+
 def make_7z(
     source: str | Path,
     destination: str | Path,
@@ -332,10 +346,11 @@ def make_7z(
     """Create ``<source_name>_<YYYY-MM-DD>.7z`` in ``destination`` via 7-Zip.
 
     Fallback 7z engine used only when the py7zr library is unavailable but a
-    system 7-Zip binary is present. Pre-scans the source for totals and emits a
-    start ``Progress`` snapshot plus a completion snapshot (the 7z binary does not
-    easily expose per-chunk bytes, so the bar moves start -> done). ``cancel``
-    terminates the subprocess.
+    system 7-Zip binary is present. Pre-scans the source for totals, then runs
+    the binary with ``-bsp2`` so it streams a live compression percentage to
+    stderr; a reader thread parses it and forwards **realtime** ``Progress``
+    updates (bytes_done derived from the percentage), so the bar moves smoothly
+    instead of jumping start -> done. ``cancel`` terminates the subprocess.
     """
     src = Path(source)
     dst = Path(destination)
@@ -380,23 +395,75 @@ def make_7z(
         if exe is None:
             # Should not happen (make_archive guards this), but stay safe.
             raise DestinationError("7-Zip binary not found")
-        cmd = [exe, "a", "-y", "-t7z", f"-mx{compress_level}", tmp, "."]
+        # -bsp2 streams a live compression percentage to stderr (separated
+        # by carriage returns); we parse it for realtime progress instead
+        # of the previous start -> done jump.
+        cmd = [exe, "a", "-y", "-t7z", f"-mx{compress_level}", "-bsp2", tmp, "."]
         proc = subprocess.Popen(
             cmd,
             cwd=str(src),
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
-        # Poll for cancellation so a batch can be aborted promptly.
-        while proc.poll() is None:
-            if cancel is not None and cancel.is_set():
-                proc.terminate()
+
+        # Reader thread: drain 7-Zip's stderr and extract the latest "NN%"
+        # progress marker. 7-Zip separates updates with "\r" (no newline),
+        # so we split on "\r" and regex the percentage out of each segment.
+        state: dict[str, int] = {"pct": 0}
+
+        def _drain() -> None:
+            try:
+                buf = b""
+                while True:
+                    chunk = proc.stderr.read(4096)
+                    if not chunk:
+                        break
+                    segs = buf.split(b"\r")
+                    buf = segs.pop()
+                    for seg in segs:
+                        pct = _last_7z_pct(seg)
+                        if pct is not None:
+                            state["pct"] = pct
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+        reader = threading.Thread(target=_drain, daemon=True)
+        reader.start()
+
+        last_pct = -1
+        try:
+            while proc.poll() is None:
+                if cancel is not None and cancel.is_set():
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    raise JobCancelled("7z cancelled")
+                pct = state["pct"]
+                if pct != last_pct and on_progress is not None:
+                    last_pct = pct
+                    bytes_done = int(bytes_total * pct / 100) if bytes_total else 0
+                    files_done = min(total, int(round(total * pct / 100))) if total else 0
+                    on_progress(
+                        Progress(
+                            job_id=job_id,
+                            files_total=total,
+                            files_done=files_done,
+                            bytes_total=bytes_total,
+                            bytes_done=bytes_done,
+                            phase=PHASE_ZIPPING,
+                        )
+                    )
+                time.sleep(0.05)
+        finally:
+            reader.join(timeout=2)
+            err = getattr(proc, "stderr", None)
+            if err is not None:
                 try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                raise JobCancelled("7z cancelled")
-            time.sleep(0.05)
+                    err.close()
+                except Exception:  # pragma: no cover - defensive
+                    pass
 
         if proc.returncode != 0:
             raise DestinationError(f"7z failed with exit code {proc.returncode}")

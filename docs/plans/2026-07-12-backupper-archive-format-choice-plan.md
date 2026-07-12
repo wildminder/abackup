@@ -271,3 +271,60 @@ output name as-given when it already has an extension, so
 ## Atomicity / safety
 No storage-format change. `winreg` import is guarded so the code still
 imports on non-Windows; `_seven_zip_registry_paths` returns `[]` there.
+
+---
+
+# Addendum 4: realtime progress from the external 7-Zip process
+
+## Problem
+`make_7z` previously discarded all of 7z's output
+(`stdout=stderr=DEVNULL`) and only emitted a start + completion
+`Progress` snapshot, so the TUI bar jumped `0%` -> `100%` with no
+intermediate movement during a (potentially long) 7z run. The user
+asked whether progress can be read from the external 7z process.
+
+## Decision
+7-Zip can emit a **live compression percentage** via its `-bsp2` switch
+(progress percentage -> stderr, each update separated by a carriage
+return `\r`, no newline). `make_7z` now:
+- passes `-bsp2` and captures `stderr=PIPE` (stdout stays `DEVNULL`
+  to suppress the file listing);
+- runs a **reader thread** that drains stderr, splits on `\r`, and
+  regex-extracts the latest `NN%` via the new `_last_7z_pct()` helper
+  into a shared `state["pct"]`;
+- in its poll loop, forwards a `Progress(PHASE_ZIPPING)` whenever the
+  percentage changes, deriving `bytes_done = bytes_total * pct / 100`
+  (and an estimated `files_done`); the bar now moves smoothly;
+- on completion emits the final `PHASE_DONE` snapshot as before.
+Cancellation is unchanged: the poll loop still `proc.terminate()`s the
+subprocess when the cancel `Event` is set.
+
+### `compression.py`
+- `import re`, `import threading`.
+- New `_last_7z_pct(segment: bytes) -> int | None` (regex `(\d+)%`).
+- `make_7z`: `-bsp2` in the command; `stderr=PIPE`; reader thread
+  + `state` dict; poll loop emits intermediate `Progress` from
+  `state["pct"]`; `finally` joins the reader and closes the pipe
+  (guarded with `getattr(proc, "stderr", None)` so tests' fake
+  procs are fine).
+
+## Tests
+- `test_last_7z_pct_parses_percentage` (0/50/100 parsed; no-% -> None).
+- `test_make_7z_emits_realtime_progress`: fake `Popen` whose stderr
+  yields `b"  0%\r  50%\r 100%\r"`; asserts the start snapshot,
+  at least one intermediate, and a final `PHASE_DONE` with
+  `bytes_done == bytes_total` (progress reached 100%).
+- The three `find_7z` tests and `test_make_archive_*` already cover
+  the binary path; `test_run_job_seven_zip` exercises the real 7z
+  end-to-end.
+
+## Docs
+- `README.md` / plan: note 7z jobs now show live progress (parsed
+  from the 7-Zip `-bsp2` stream).
+
+## Atomicity / safety
+No storage-format change. The reader thread is daemon and defensive
+(`except Exception: pass`); the pipe is closed in `finally`. The
+percentage is a UI hint only — `bytes_done` is derived, not
+authoritative, so a slightly off bar during 7z runs is cosmetic,
+not a correctness issue.

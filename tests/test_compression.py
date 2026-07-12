@@ -1,5 +1,6 @@
 from datetime import date
 from pathlib import Path
+import time
 
 import pytest
 
@@ -161,7 +162,7 @@ def test_make_archive_prefers_system_binary_by_default(
     class FakeProc:
         def __init__(self, cmd, **kw):
             captured["cmd"] = cmd
-            Path(cmd[5]).write_bytes(b"7z-archive")
+            Path(cmd[6]).write_bytes(b"7z-archive")
             self.returncode = 0
 
         def poll(self):
@@ -191,7 +192,7 @@ def test_make_archive_prefers_system_binary_when_prefer_py7zr_false(
     class FakeProc:
         def __init__(self, cmd, **kw):
             captured["cmd"] = cmd
-            Path(cmd[5]).write_bytes(b"7z-archive")
+            Path(cmd[6]).write_bytes(b"7z-archive")
             self.returncode = 0
 
         def poll(self):
@@ -223,7 +224,7 @@ def test_make_archive_falls_back_to_system_7z_when_py7zr_missing(
         def __init__(self, cmd, **kw):
             captured["cmd"] = cmd
             # 7z writes the archive to the temp path (cmd[5]).
-            Path(cmd[5]).write_bytes(b"7z-archive")
+            Path(cmd[6]).write_bytes(b"7z-archive")
             self.returncode = 0
 
         def poll(self):
@@ -333,3 +334,67 @@ def test_make_7z_cancel_raises(monkeypatch, sample_tree, dest_dir):
         make_7z(sample_tree, dest_dir, when=date(2026, 7, 12), cancel=cancel)
     # No archive should have been finalised.
     assert not list(dest_dir.glob("*.7z"))
+
+
+def test_last_7z_pct_parses_percentage():
+    # 7-Zip's -bsp2 stream emits "NN%" markers separated by "\r".
+    assert compression._last_7z_pct(b"  0%") == 0
+    assert compression._last_7z_pct(b"  50%\r") == 50
+    assert compression._last_7z_pct(b"Scan .\\\r  100%\r") == 100
+    # Segments without a percentage yield None.
+    assert compression._last_7z_pct(b"  0M Scan") is None
+
+
+def test_make_7z_emits_realtime_progress(monkeypatch, sample_tree, dest_dir):
+    # 7-Zip streams a live "NN%" to stderr (-bsp2); make_7z must
+    # forward intermediate progress, not just start -> done.
+    monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
+
+    class _Stderr:
+        def __init__(self, data, delay=0.01):
+            self._data = data
+            self._pos = 0
+            self._delay = delay
+
+        def read(self, n=-1):
+            if self._pos >= len(self._data):
+                return b""
+            # Emit a few bytes at a time so the reader parses progressively.
+            chunk = self._data[self._pos : self._pos + 3]
+            self._pos += len(chunk)
+            time.sleep(self._delay)
+            return chunk
+
+        def close(self):
+            pass
+
+    class FakeProc:
+        def __init__(self, cmd, **kw):
+            self.returncode = 0
+            self._polls = 0
+            self.stderr = _Stderr(b"  0%\r  50%\r 100%\r")
+            # 7z writes the archive to the temp path (cmd[5]).
+            Path(cmd[6]).write_bytes(b"7z-archive")
+
+        def poll(self):
+            self._polls += 1
+            # Stay "running" briefly so the poll loop can observe progress.
+            return None if self._polls <= 6 else 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(compression.subprocess, "Popen", FakeProc)
+    seen = []
+    out = make_7z(
+        sample_tree, dest_dir, when=date(2026, 7, 12), on_progress=seen.append
+    )
+    assert out.suffix == ".7z"
+    assert out.exists()
+    # Start snapshot (PHASE_ZIPPING) + at least one intermediate + final DONE.
+    assert seen[0].phase == compression.PHASE_ZIPPING
+    assert seen[-1].phase == compression.PHASE_DONE
+    assert seen[-1].bytes_done == seen[-1].bytes_total
+    # Progress actually advanced to 100% at some point.
+    assert max(p.bytes_done for p in seen) == seen[-1].bytes_total
+    assert any(p.bytes_done > 0 for p in seen)
