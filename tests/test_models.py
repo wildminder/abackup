@@ -35,6 +35,16 @@ def test_job_method_str_coerced():
     assert j.to_dict()["method"] == "zip"
 
 
+def test_job_method_seven_zip_coerced():
+    j = BackupJob(source="C:/a", destination="D:/b", method="7z")
+    assert j.method is BackupMethod.SEVEN_ZIP
+    assert j.to_dict()["method"] == "7z"
+
+
+def test_backup_method_values():
+    assert {m.value for m in BackupMethod} == {"copy", "zip", "7z"}
+
+
 def test_job_from_dict_round_trip():
     j = BackupJob(source="C:/a", destination="D:/b", method="copy", name="n", last_status="success")
     j2 = BackupJob.from_dict(j.to_dict())
@@ -100,3 +110,10 @@ def test_settings_validate_rejects_bad_log_level():
 def test_settings_validate_ok():
     # Valid settings must not raise.
     Settings(zip_compression_level=0, max_workers=1, log_level="DEBUG").validate()
+
+
+def test_settings_legacy_prefer_7z_mapped_to_prefer_py7zr():
+    # Old settings.json used "prefer_7z"; it must map to "prefer_py7zr".
+    s = Settings.from_dict({"prefer_7z": False})
+    assert s.prefer_py7zr is False
+    assert "prefer_7z" not in s.to_dict()

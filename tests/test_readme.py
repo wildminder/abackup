@@ -25,7 +25,7 @@ def test_readme_mentions_commands():
         "Settings",
         "compression level",
         "7-Zip",
-        "Prefer 7-Zip",
+        "Prefer py7zr",
         "Documents",
         "home",
         "--show-settings",

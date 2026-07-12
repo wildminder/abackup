@@ -54,6 +54,37 @@ def test_make_archive_uses_py7zr_when_available(sample_tree, dest_dir):
     assert "b.txt" in names
 
 
+def test_make_archive_prefers_system_binary_when_prefer_py7zr_false(
+    monkeypatch, sample_tree, dest_dir
+):
+    # py7zr is importable, but the user opted to prefer the (faster) system
+    # 7-Zip binary, so make_archive must shell out rather than use py7zr.
+    monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
+
+    captured = {}
+
+    class FakeProc:
+        def __init__(self, cmd, **kw):
+            captured["cmd"] = cmd
+            Path(cmd[5]).write_bytes(b"7z-archive")
+            self.returncode = 0
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(compression.subprocess, "Popen", FakeProc)
+    out = make_archive(
+        sample_tree, dest_dir, when=date(2026, 7, 12), prefer_py7zr=False
+    )
+    assert out.suffix == ".7z"
+    assert out.exists()
+    assert "-t7z" in captured["cmd"]
+    assert "-mx6" in captured["cmd"]
+
+
 def test_make_archive_falls_back_to_system_7z_when_py7zr_missing(
     monkeypatch, sample_tree, dest_dir
 ):

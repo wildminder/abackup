@@ -92,7 +92,7 @@ class RunAllScreen(Screen):
                 config_dir=self.config_dir,
                 data_dir=self.data_dir,
                 max_workers=settings.max_workers,
-                prefer_7z=settings.prefer_7z,
+                prefer_py7zr=settings.prefer_py7zr,
                 on_job_done=on_job_done,
                 on_progress=on_progress,
                 cancel=self._cancel,

@@ -50,7 +50,7 @@ class RunJobScreen(Screen):
             self.job,
             config_dir=self.config_dir,
             data_dir=self.data_dir,
-            prefer_7z=load_settings(self.config_dir).prefer_7z,
+            prefer_py7zr=load_settings(self.config_dir).prefer_py7zr,
             on_progress=on_progress,
         )
         self.query_one("#progress", ProgressBar).update(progress=100)

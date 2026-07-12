@@ -74,14 +74,29 @@ def make_archive(
     job_id: str = "",
     on_progress: OptionalProgressCallback = None,
     prefer_7z: bool = True,
+    prefer_py7zr: bool = True,
 ) -> Path:
     """Create an archive of ``source`` in ``destination``.
 
-    Precedence when ``prefer_7z`` is set: py7zr library (primary) -> system 7-Zip
-    binary (fallback) -> deterministic stdlib ``.zip`` (last resort). When
-    ``prefer_7z`` is ``False``, always uses the stdlib ``.zip`` writer.
+    When ``prefer_7z`` is ``False`` (the user explicitly chose the ``.zip``
+    method), always uses the deterministic stdlib ``.zip`` writer. When the user
+    wants 7z (``prefer_7z=True``), the engine is chosen by ``prefer_py7zr``:
+
+    * ``prefer_py7zr=True`` (default) -> py7zr library (primary).
+    * otherwise -> system 7-Zip binary when present, else py7zr as a fallback.
+    * if no 7z engine is available at all -> stdlib ``.zip`` (safety net).
     """
-    if prefer_7z and _have_py7zr():
+    if not prefer_7z:
+        return make_zip(
+            source,
+            destination,
+            when=when,
+            compress_level=compress_level,
+            cancel=cancel,
+            job_id=job_id,
+            on_progress=on_progress,
+        )
+    if prefer_py7zr and _have_py7zr():
         return make_7z_py7zr(
             source,
             destination,
@@ -91,8 +106,18 @@ def make_archive(
             job_id=job_id,
             on_progress=on_progress,
         )
-    if prefer_7z and find_7z() is not None:
+    if find_7z() is not None:
         return make_7z(
+            source,
+            destination,
+            when=when,
+            compress_level=compress_level,
+            cancel=cancel,
+            job_id=job_id,
+            on_progress=on_progress,
+        )
+    if _have_py7zr():
+        return make_7z_py7zr(
             source,
             destination,
             when=when,

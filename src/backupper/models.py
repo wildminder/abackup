@@ -18,6 +18,7 @@ NAMESPACE = uuid.UUID("b3a1f2c4-0000-4000-8000-000000000001")
 class BackupMethod(str, Enum):
     COPY = "copy"
     ZIP = "zip"
+    SEVEN_ZIP = "7z"
 
     @classmethod
     def from_str(cls, value: str) -> "BackupMethod":
@@ -38,7 +39,7 @@ class Settings:
     log_level: str = "INFO"
     max_workers: int = 4
     zip_compression_level: int = 6
-    prefer_7z: bool = True
+    prefer_py7zr: bool = True
     created_at: str = field(default_factory=lambda: _now().isoformat())
 
     def to_dict(self) -> dict[str, Any]:
@@ -46,6 +47,11 @@ class Settings:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
+        data = dict(data)
+        # Backward-compat: the old "prefer_7z" key meant "prefer 7z over zip";
+        # it now controls the 7z engine (py7zr library vs system binary).
+        if "prefer_7z" in data and "prefer_py7zr" not in data:
+            data["prefer_py7zr"] = data.pop("prefer_7z")
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
         return cls(**known)
 

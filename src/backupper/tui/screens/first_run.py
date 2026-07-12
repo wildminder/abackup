@@ -28,6 +28,7 @@ class FirstRunScreen(Screen):
         with RadioSet(id="method"):
             yield RadioButton("Direct copy", value=True, id="copy")
             yield RadioButton("Zip archive", id="zip")
+            yield RadioButton("7z archive (better compression, slower)", id="seven_zip")
         yield Static("", id="error")
         yield Horizontal(
             Button("Save", id="save", variant="primary"),
@@ -43,7 +44,9 @@ class FirstRunScreen(Screen):
         source = self.query_one("#source", Input).value.strip()
         dest = self.query_one("#dest", Input).value.strip()
         method = (
-            BackupMethod.ZIP
+            BackupMethod.SEVEN_ZIP
+            if self.query_one("#seven_zip", RadioButton).value
+            else BackupMethod.ZIP
             if self.query_one("#zip", RadioButton).value
             else BackupMethod.COPY
         )

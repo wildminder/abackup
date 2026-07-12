@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-from abackup.core.compression import make_archive
+from abackup.core.compression import make_archive, make_zip
 from abackup.core.copy import copy_tree
 from abackup.core.paths import get_data_dir, ensure_dir
 from abackup.core.progress import (
@@ -50,7 +50,7 @@ def run_job(
     on_progress: Optional[ProgressFn] = None,
     clock=None,
     zip_compression_level: int = 6,
-    prefer_7z: bool = True,
+    prefer_py7zr: bool = True,
     cancel=None,
 ) -> BackupResult:
     """Run a single backup job.
@@ -96,16 +96,27 @@ def run_job(
 
     try:
         if job.method == BackupMethod.ZIP:
-            out = make_archive(
+            out = make_zip(
                 job.source,
                 job.destination,
                 compress_level=zip_compression_level,
-                prefer_7z=prefer_7z,
                 cancel=cancel,
                 job_id=job.id,
                 on_progress=_forward,
             )
             summary: dict = {"archive": str(out)}
+        elif job.method == BackupMethod.SEVEN_ZIP:
+            out = make_archive(
+                job.source,
+                job.destination,
+                compress_level=zip_compression_level,
+                prefer_7z=True,
+                prefer_py7zr=prefer_py7zr,
+                cancel=cancel,
+                job_id=job.id,
+                on_progress=_forward,
+            )
+            summary = {"archive": str(out)}
         else:
             summary = copy_tree(
                 job.source,

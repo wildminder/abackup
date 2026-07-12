@@ -35,6 +35,28 @@ async def test_add_job_wizard_creates_job(
         assert jobs[0].method.value == "zip"
 
 
+async def test_add_job_wizard_creates_7z_job(
+    tmp_config, tmp_data, sample_tree, dest_dir
+):
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        await pilot.click("#add")
+        await pilot.pause()
+        assert isinstance(app.screen, FirstRunScreen)
+
+        app.screen.query_one("#source", Input).value = str(sample_tree)
+        app.screen.query_one("#dest", Input).value = str(dest_dir)
+        app.screen.query_one("#seven_zip", RadioButton).value = True
+        await pilot.click("#save")
+        await pilot.pause()
+        assert isinstance(app.screen, MainMenuScreen)
+
+        jobs = load_jobs(tmp_config)
+        assert len(jobs) == 1
+        assert jobs[0].method.value == "7z"
+
+
 async def test_add_job_wizard_rejects_missing_source(tmp_config, tmp_data, dest_dir):
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
@@ -371,7 +393,7 @@ async def test_run_job_screen_shows_realtime_progress(tmp_config, tmp_data, monk
         clock=None,
         zip_compression_level=6,
         cancel=None,
-        prefer_7z=None,
+        prefer_py7zr=None,
     ):
         # Scripted realtime sequence: 0% (no file yet) -> 100% (mid.txt).
         on_progress(
@@ -447,7 +469,7 @@ async def test_run_all_screen_shows_realtime_progress(tmp_config, tmp_data, monk
         clock=None,
         zip_compression_level=None,
         cancel=None,
-        prefer_7z=None,
+        prefer_py7zr=None,
     ):
         for j in jobs:
             on_progress(

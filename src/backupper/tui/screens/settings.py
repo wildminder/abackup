@@ -88,10 +88,15 @@ class SettingsScreen(Screen):
                 classes="field",
             ),
             Vertical(
-                Checkbox("Prefer 7-Zip when installed (better compression)", id="prefer_7z"),
+                Checkbox(
+                    "Prefer py7zr library for 7z (else system 7-Zip binary)",
+                    id="prefer_py7zr",
+                ),
                 Static(
-                    "Uses 7z for the 'zip' method when available; falls back to "
-                    "Python's zipfile. Disable for byte-reproducible archives.",
+                    "7z jobs use the pure-Python py7zr library by default. Disable "
+                    "to prefer the (usually faster) system 7-Zip binary when "
+                    "installed. The 'zip' method is unaffected and always uses "
+                    "Python's zipfile.",
                     classes="field-hint",
                 ),
                 classes="field",
@@ -113,7 +118,7 @@ class SettingsScreen(Screen):
         self.query_one("#workers", Input).value = str(self._existing.max_workers)
         self.query_one("#log_level", Select).value = self._existing.log_level
         self.query_one("#default_dest", Input).value = self._existing.default_destination or ""
-        self.query_one("#prefer_7z", Checkbox).value = self._existing.prefer_7z
+        self.query_one("#prefer_py7zr", Checkbox).value = self._existing.prefer_py7zr
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
@@ -130,7 +135,7 @@ class SettingsScreen(Screen):
             workers = int(self.query_one("#workers", Input).value)
             log_level = self.query_one("#log_level", Select).value
             default_dest = self.query_one("#default_dest", Input).value.strip() or None
-            prefer_7z = self.query_one("#prefer_7z", Checkbox).value
+            prefer_py7zr = self.query_one("#prefer_py7zr", Checkbox).value
         except ValueError as exc:
             error.update(f"Invalid number: {exc}")
             return
@@ -141,7 +146,7 @@ class SettingsScreen(Screen):
             log_level=log_level,
             max_workers=workers,
             zip_compression_level=zip_level,
-            prefer_7z=prefer_7z,
+            prefer_py7zr=prefer_py7zr,
             created_at=self._existing.created_at,
         )
         try:

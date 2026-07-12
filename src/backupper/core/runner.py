@@ -37,7 +37,7 @@ def run_jobs_batch(
     on_progress: Optional[JobProgressFn] = None,
     clock=None,
     zip_compression_level: int | None = None,
-    prefer_7z: bool | None = None,
+    prefer_py7zr: bool | None = None,
     cancel: Optional[threading.Event] = None,
 ) -> List[BackupResult]:
     """Run every job concurrently using a bounded worker-thread pool + queue.
@@ -58,8 +58,8 @@ def run_jobs_batch(
         clock = datetime.now
     if zip_compression_level is None:
         zip_compression_level = load_settings(config_dir).zip_compression_level
-    if prefer_7z is None:
-        prefer_7z = load_settings(config_dir).prefer_7z
+    if prefer_py7zr is None:
+        prefer_py7zr = load_settings(config_dir).prefer_py7zr
 
     order = [j.id for j in jobs]
     results: dict[str, BackupResult] = {}
@@ -99,7 +99,7 @@ def run_jobs_batch(
                     data_dir=data_dir,
                     clock=clock,
                     zip_compression_level=zip_compression_level,
-                    prefer_7z=prefer_7z,
+                    prefer_py7zr=prefer_py7zr,
                     cancel=cancel,
                     on_progress=(
                         (lambda p: on_progress(job.id, p)) if on_progress else None

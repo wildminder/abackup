@@ -11,12 +11,13 @@ Use **Add job** to create a job; the add-job form interactively asks for:
 2. **Destination folder** — where backups are written.
 3. **Method** — how to back up:
     - **Direct copy** — mirrors the source tree into the destination.
-    - **Zip archive** — creates `<source_name>_<YYYY-MM-DD>.zip` in the destination.
-      When 7z output is preferred (see Settings), ABackup produces a smaller
-      `<source_name>_<YYYY-MM-DD>.7z` (LZMA2) archive instead. The **py7zr**
-      library is used by default (no external binary required); if py7zr is
-      unavailable, the system [7-Zip](https://www.7-zip.org/) binary is used as a
-      fallback, and if neither is present it falls back to the standard `.zip`.
+    - **Zip archive** — creates `<source_name>_<YYYY-MM-DD>.zip` in the destination
+      using Python's `zipfile` (fast, deterministic, no external dependency).
+    - **7z archive** — creates `<source_name>_<YYYY-MM-DD>.7z` (LZMA2) in the
+      destination. Compresses better than zip but is slower. The **py7zr** library
+      is used by default; if you disable *Prefer py7zr* in Settings, the (usually
+      faster) system [7-Zip](https://www.7-zip.org/) binary is used instead when
+      present.
 
 Jobs and settings are stored as JSON under a config directory in your home folder
 (`Documents\abackup` on Windows, `~/abackup` elsewhere) and survive restarts.
@@ -103,11 +104,11 @@ Open the **Settings** screen from the main menu to tune global options:
   (jobs, settings, logs) to the new location atomically.
   - **Zip compression level** — `0` (store, no compression) to `9` (max). Default `6`.
     Applies to the `zip` backup method.
-  - **Prefer 7-Zip** — when enabled (default), the `zip` method produces a `.7z`
-    (LZMA2) archive instead of a standard `.zip`. The **py7zr** library is used
-    directly (no external dependency); if py7zr is missing, the system 7-Zip
-    binary is used as a fallback. Disable it to always use the built-in `zipfile`
-    writer.
+  - **Prefer py7zr** — controls the engine used for **7z** jobs. Enabled by
+    default, 7z jobs use the pure-Python **py7zr** library (no external
+    dependency). Disable it to prefer the (usually faster) system
+    [7-Zip](https://www.7-zip.org/) binary when installed. The **Zip archive**
+    method is unaffected and always uses Python's `zipfile`.
 - **Max workers** — default number of concurrent jobs for *Run all jobs*.
 - **Default destination** — pre-filled destination for new jobs.
 - **Log level** — `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
@@ -152,5 +153,5 @@ pytest --cov=src/abackup --cov-fail-under=90
 
 Determinism: timestamps are injectable, IDs use `uuid5` (not random), and the
 built-in `zip` output is byte-reproducible. Note that 7-Zip (`.7z`) archives are
-*not* byte-reproducible — if you need deterministic output, disable **Prefer
-7-Zip** in Settings (or set `prefer_7z = false`).
+*not* byte-reproducible — if you need deterministic output, use the **Zip
+archive** method (or set `prefer_py7zr = false` to avoid the py7zr engine).

@@ -23,10 +23,19 @@ def test_run_job_copy(sample_tree, dest_dir, tmp_config, tmp_data):
 def test_run_job_zip(sample_tree, dest_dir, tmp_config, tmp_data):
     job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="zip")
     result = run_job(
-        job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock, prefer_7z=False
+        job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock, prefer_py7zr=False
     )
     assert result.status == "success"
     assert "archive" in result.summary
+
+
+def test_run_job_seven_zip(sample_tree, dest_dir, tmp_config, tmp_data):
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="7z")
+    result = run_job(
+        job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock, prefer_py7zr=False
+    )
+    assert result.status == "success"
+    assert result.summary["archive"].endswith(".7z")
 
 
 def test_run_job_invalid_source_fails(dest_dir, tmp_config, tmp_data):
@@ -54,11 +63,11 @@ def test_run_job_uses_compression_level(sample_tree, dest_dir, tmp_config, tmp_d
 
     captured = {}
 
-    def fake_make_archive(source, destination, *, when=None, compress_level=6, cancel=None, job_id="", on_progress=None, prefer_7z=True):
+    def fake_make_zip(source, destination, *, when=None, compress_level=6, cancel=None, job_id="", on_progress=None):
         captured["compress_level"] = compress_level
         return Path(destination) / "x.zip"
 
-    monkeypatch.setattr(backup_mod, "make_archive", fake_make_archive)
+    monkeypatch.setattr(backup_mod, "make_zip", fake_make_zip)
     job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="zip")
     run_job(
         job,
@@ -119,7 +128,7 @@ def test_run_job_zip_emits_progress(sample_tree, dest_dir, tmp_config, tmp_data)
         config_dir=tmp_config,
         data_dir=tmp_data,
         clock=_clock,
-        prefer_7z=False,
+        prefer_py7zr=False,
         on_progress=lambda p: seen.append(p),
     )
     assert any(p.phase == "zipping" for p in seen)
@@ -175,7 +184,7 @@ def test_run_job_cancel_zip_mid_run(sample_tree, dest_dir, tmp_config, tmp_data,
         config_dir=tmp_config,
         data_dir=tmp_data,
         clock=_clock,
-        prefer_7z=False,
+        prefer_py7zr=False,
         cancel=cancel,
     )
     assert result.status == "cancelled"
