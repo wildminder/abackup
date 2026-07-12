@@ -43,3 +43,25 @@ def test_run_job_writes_manifest(sample_tree, dest_dir, tmp_config, tmp_data):
     manifest = json.loads(Path(result.manifest_path).read_text())
     assert manifest["status"] == "success"
     assert manifest["method"] == "copy"
+
+
+def test_run_job_uses_compression_level(sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch):
+    import abackup.core.backup as backup_mod
+    from pathlib import Path
+
+    captured = {}
+
+    def fake_make_zip(source, destination, *, when=None, compress_level=6):
+        captured["compress_level"] = compress_level
+        return Path(destination) / "x.zip"
+
+    monkeypatch.setattr(backup_mod, "make_zip", fake_make_zip)
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="zip")
+    run_job(
+        job,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        clock=_clock,
+        zip_compression_level=3,
+    )
+    assert captured["compress_level"] == 3

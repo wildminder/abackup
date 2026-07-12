@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -11,10 +12,26 @@ import platformdirs
 _UNSAFE = re.compile(r"[^\w.\-]+")
 
 
+def default_config_dir(platform: str | None = None, home: Path | None = None) -> Path:
+    """Resolve the default settings/jobs storage directory.
+
+    - Windows: ``<home>/Documents/abackup``
+    - Other platforms: ``<home>/abackup``
+
+    ``platform``/``home`` are injectable so tests are deterministic without
+    touching ``sys`` or ``Path.home()``.
+    """
+    platform = platform or sys.platform
+    home = home or Path.home()
+    if platform == "win32":
+        return home / "Documents" / "abackup"
+    return home / "abackup"
+
+
 def get_config_dir(override: str | Path | None = None) -> Path:
     if override:
         return Path(override)
-    return Path(platformdirs.user_config_dir("abackup", "abackup"))
+    return default_config_dir()
 
 
 def get_data_dir(override: str | Path | None = None) -> Path:

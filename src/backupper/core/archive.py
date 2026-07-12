@@ -20,6 +20,7 @@ def make_zip(
     destination: str | Path,
     *,
     when: date | None = None,
+    compress_level: int = 6,
 ) -> Path:
     """Create ``<source_name>_<YYYY-MM-DD>.zip`` in ``destination``.
 
@@ -40,7 +41,7 @@ def make_zip(
     fd, tmp = tempfile.mkstemp(dir=str(dst), suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as out, zipfile.ZipFile(
-            out, "w", zipfile.ZIP_DEFLATED
+            out, "w", zipfile.ZIP_DEFLATED, compresslevel=compress_level
         ) as zf:
             files = sorted(
                 (p for p in src.rglob("*") if p.is_file()), key=lambda p: p.as_posix()
@@ -50,7 +51,7 @@ def make_zip(
                 info = zipfile.ZipInfo(arcname, date_time=ZIP_EPOCH)
                 info.compress_type = zipfile.ZIP_DEFLATED
                 with open(f, "rb") as inp:
-                    zf.writestr(info, inp.read())
+                    zf.writestr(info, inp.read(), compresslevel=compress_level)
         os.replace(tmp, final)
     except BaseException:
         if os.path.exists(tmp):

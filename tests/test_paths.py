@@ -1,4 +1,5 @@
 from datetime import date
+from pathlib import Path
 
 from abackup.core.paths import (
     get_config_dir,
@@ -7,12 +8,26 @@ from abackup.core.paths import (
     safe_archive_name,
     settings_file_path,
     jobs_file_path,
+    default_config_dir,
 )
 
 
 def test_override_dirs():
     assert get_config_dir("C:/x").as_posix() == "C:/x"
     assert get_data_dir("C:/y").as_posix() == "C:/y"
+
+
+def test_default_config_dir_windows():
+    assert default_config_dir("win32", Path("/x")) == Path("/x/Documents/abackup")
+
+
+def test_default_config_dir_posix():
+    assert default_config_dir("linux", Path("/x")) == Path("/x/abackup")
+    assert default_config_dir("darwin", Path("/x")) == Path("/x/abackup")
+
+
+def test_get_config_dir_override_wins():
+    assert get_config_dir("C:/override") == Path("C:/override")
 
 
 def test_ensure_dir_idempotent(tmp_path):

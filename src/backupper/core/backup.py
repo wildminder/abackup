@@ -40,6 +40,7 @@ def run_job(
     data_dir: str | Path | None = None,
     on_progress: Optional[ProgressFn] = None,
     clock=None,
+    zip_compression_level: int = 6,
 ) -> BackupResult:
     """Run a single backup job.
 
@@ -55,7 +56,9 @@ def run_job(
 
     try:
         if job.method == BackupMethod.ZIP:
-            out = make_zip(job.source, job.destination)
+            out = make_zip(
+                job.source, job.destination, compress_level=zip_compression_level
+            )
             summary: dict = {"archive": str(out)}
         else:
             summary = copy_tree(job.source, job.destination, on_progress=on_progress)

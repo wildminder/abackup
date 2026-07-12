@@ -78,3 +78,26 @@ def test_cli_workers_flag(tmp_config, tmp_data, sample_tree, tmp_path, monkeypat
     monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
     main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data, "--workers", "2"])
     assert captured["max_workers"] == 2
+
+
+def test_cli_show_settings(tmp_config, tmp_data, capsys):
+    save_settings(Settings(first_run_completed=True, zip_compression_level=7), tmp_config)
+    main(["--show-settings", "--config-dir", tmp_config])
+    out = capsys.readouterr().out
+    assert "config_dir" in out
+    assert "zip_compression_level" in out
+    assert "7" in out
+
+
+def test_cli_show_settings_reflects_default_location(tmp_config, tmp_data, capsys, monkeypatch):
+    # Force the default (no override) to a temp dir so we can assert the path.
+    import json as _json
+
+    import abackup.cli as cli_mod
+
+    monkeypatch.setattr(cli_mod, "get_config_dir", lambda override=None: tmp_config)
+    save_settings(Settings(first_run_completed=True), tmp_config)
+    main(["--show-settings"])
+    out = capsys.readouterr().out
+    data = _json.loads(out)
+    assert data["config_dir"] == tmp_config

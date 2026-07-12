@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from textual.widgets import Input, RadioButton, Static
 
 from abackup.cli import ABackupApp
@@ -8,6 +9,7 @@ from abackup.tui.screens.first_run import FirstRunScreen
 from abackup.tui.screens.main_menu import MainMenuScreen
 from abackup.tui.screens.run_job import RunJobScreen
 from abackup.tui.screens.run_all import RunAllScreen
+from abackup.tui.screens.settings import SettingsScreen
 
 
 async def test_first_run_wizard_creates_job_and_settings(
@@ -202,3 +204,72 @@ async def test_run_all_screen_back_button(tmp_config, tmp_data, sample_tree, des
         await pilot.click("#back")
         await pilot.pause()
         assert isinstance(app.screen, MainMenuScreen)
+
+
+async def test_main_menu_settings_button(tmp_config, tmp_data):
+    save_settings(Settings(first_run_completed=True), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        await pilot.click("#settings")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsScreen)
+
+
+async def test_settings_change_compression_level(tmp_config, tmp_data):
+    save_settings(Settings(first_run_completed=True), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        app.push_screen(SettingsScreen(tmp_config, tmp_data))
+        await pilot.pause()
+        app.screen.query_one("#zip_level", Input).value = "9"
+        await pilot.click("#save")
+        await pilot.pause()
+        assert load_settings(tmp_config).zip_compression_level == 9
+        assert isinstance(app.screen, MainMenuScreen)
+
+
+async def test_settings_validation_error_stays(tmp_config, tmp_data):
+    save_settings(Settings(first_run_completed=True, zip_compression_level=6), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(tmp_config, tmp_data))
+        await pilot.pause()
+        app.screen.query_one("#zip_level", Input).value = "99"
+        await pilot.click("#save")
+        await pilot.pause()
+        # Invalid value -> stays on settings, file unchanged.
+        assert isinstance(app.screen, SettingsScreen)
+        assert load_settings(tmp_config).zip_compression_level == 6
+
+
+async def test_settings_relocate_on_save(tmp_config, tmp_data, tmp_path):
+    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_jobs([BackupJob(source="C:/x", destination="D:/y", method="copy")], tmp_config)
+    new_dir = tmp_path / "newloc"
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(tmp_config, tmp_data))
+        await pilot.pause()
+        app.screen.query_one("#config_dir", Input).value = str(new_dir)
+        await pilot.click("#save")
+        await pilot.pause()
+        assert (new_dir / "settings.json").exists()
+        assert (new_dir / "jobs.json").exists()
+        assert not (Path(tmp_config) / "settings.json").exists()
+        assert app.config_dir == str(new_dir)
+        assert isinstance(app.screen, MainMenuScreen)
+
+
+async def test_settings_cancel_no_change(tmp_config, tmp_data):
+    save_settings(Settings(first_run_completed=True, zip_compression_level=6), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(tmp_config, tmp_data))
+        await pilot.pause()
+        app.screen.query_one("#zip_level", Input).value = "1"
+        await pilot.click("#cancel")
+        await pilot.pause()
+        assert isinstance(app.screen, MainMenuScreen)
+        assert load_settings(tmp_config).zip_compression_level == 6

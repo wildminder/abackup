@@ -63,3 +63,47 @@ def test_settings_from_dict_keeps_default_without_field():
     s = Settings.from_dict({"first_run_completed": True})
     assert s.max_workers == 4
     assert s.first_run_completed is True
+
+
+def test_zip_level_default_6():
+    assert Settings().zip_compression_level == 6
+
+
+def test_zip_level_round_trip():
+    s = Settings(zip_compression_level=9)
+    assert Settings.from_dict(s.to_dict()).zip_compression_level == 9
+
+
+def test_settings_from_dict_defaults_level():
+    # Old settings.json (no zip_compression_level) loads with default 6.
+    s = Settings.from_dict({"first_run_completed": True})
+    assert s.zip_compression_level == 6
+
+
+def test_settings_validate_rejects_level_10():
+    try:
+        Settings(zip_compression_level=10).validate()
+    except ConfigError:
+        return
+    raise AssertionError("expected ConfigError")
+
+
+def test_settings_validate_rejects_level_neg():
+    try:
+        Settings(zip_compression_level=-1).validate()
+    except ConfigError:
+        return
+    raise AssertionError("expected ConfigError")
+
+
+def test_settings_validate_rejects_bad_log_level():
+    try:
+        Settings(log_level="VERBOSE").validate()
+    except ConfigError:
+        return
+    raise AssertionError("expected ConfigError")
+
+
+def test_settings_validate_ok():
+    # Valid settings must not raise.
+    Settings(zip_compression_level=0, max_workers=1, log_level="DEBUG").validate()

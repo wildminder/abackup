@@ -11,8 +11,8 @@ On first run, ABackup interactively asks for:
    - **Direct copy** — mirrors the source tree into the destination.
    - **Zip archive** — creates `<source_name>_<YYYY-MM-DD>.zip` in the destination.
 
-Jobs and settings are stored as JSON under your OS config directory and survive
-restarts.
+Jobs and settings are stored as JSON under a config directory in your home folder
+(`Documents\abackup` on Windows, `~/abackup` elsewhere) and survive restarts.
 
 ## Install
 
@@ -42,6 +42,7 @@ python -m abackup
 | `--reset` | Reset the first-run flag so the setup wizard shows again (requires `--config-dir`). |
 | `--run-all` | Run every configured job non-interactively and print a summary (requires `--config-dir`). |
 | `--workers N` | Number of concurrent backup workers for `--run-all` (default: `max_workers` setting). |
+| `--show-settings` | Print the resolved config directory and current settings as JSON, then exit. |
 
 Example (portable / automated):
 
@@ -63,7 +64,30 @@ large number of jobs is processed with bounded memory. The worker count is
 controlled by the `max_workers` setting (default `4`) or the `--workers` flag. A
 failing job never stops the others, and each job's status is persisted.
 
+### Settings
+
+Open the **Settings** screen from the main menu to tune global options:
+
+- **Storage location** — the config directory. Changing it moves all existing data
+  (jobs, settings, logs) to the new location atomically.
+- **Zip compression level** — `0` (store, no compression) to `9` (max). Default `6`.
+  Applies to the `zip` backup method.
+- **Max workers** — default number of concurrent jobs for *Run all jobs*.
+- **Default destination** — pre-filled destination for new jobs.
+- **Log level** — `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
+
+You can also inspect the resolved config directory and current settings non-interactively:
+
+```bash
+python -m abackup --show-settings
+# => {"config_dir": "...", "zip_compression_level": 6, "max_workers": 4, ...}
+```
+
 ## Storage
+
+`<config>` defaults to `Documents\abackup` on Windows and `~/abackup` elsewhere
+(overridable with `--config-dir` or the Settings screen). `<data>` defaults to
+`<config>` unless `--data-dir` is given.
 
 - **Settings:** `<config>/settings.json` (first-run flag, defaults).
 - **Jobs:** `<config>/jobs.json` (array of backup jobs).

@@ -23,6 +23,12 @@ def test_readme_mentions_commands():
         "--run-all",
         "--workers",
         "max_workers",
+        "Settings",
+        "compression level",
+        "Documents",
+        "home",
+        "--show-settings",
+        "zip_compression_level",
     ]:
         assert token in text
 

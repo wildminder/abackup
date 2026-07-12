@@ -7,7 +7,7 @@ import threading
 from datetime import datetime
 from typing import Callable, List, Optional
 
-from abackup.config import load_jobs, save_jobs
+from abackup.config import load_jobs, save_jobs, load_settings
 from abackup.core.backup import BackupResult, run_job
 from abackup.core.jobs import upsert_job
 from abackup.models import BackupJob
@@ -24,6 +24,7 @@ def run_jobs_batch(
     max_workers: int = 4,
     on_job_done: Optional[ProgressFn] = None,
     clock=None,
+    zip_compression_level: int | None = None,
 ) -> List[BackupResult]:
     """Run every job concurrently using a bounded worker-thread pool + queue.
 
@@ -37,6 +38,8 @@ def run_jobs_batch(
 
     if clock is None:
         clock = datetime.now
+    if zip_compression_level is None:
+        zip_compression_level = load_settings(config_dir).zip_compression_level
 
     order = [j.id for j in jobs]
     results: dict[str, BackupResult] = {}
@@ -54,7 +57,11 @@ def run_jobs_batch(
                 return
             try:
                 result = run_job(
-                    job, config_dir=config_dir, data_dir=data_dir, clock=clock
+                    job,
+                    config_dir=config_dir,
+                    data_dir=data_dir,
+                    clock=clock,
+                    zip_compression_level=zip_compression_level,
                 )
                 if result.updated_job is not None:
                     with lock:

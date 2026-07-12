@@ -108,3 +108,83 @@ def test_no_tmp_leftovers_after_batch(sample_tree, tmp_path, tmp_config, tmp_dat
     jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(5)]
     run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=3)
     assert list(Path(tmp_config).glob("*.tmp")) == []
+
+
+def test_run_jobs_batch_passes_level_from_settings(
+    sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch
+):
+    from abackup.config import save_settings
+    from abackup.models import Settings
+
+    import abackup.core.runner as runner_mod
+
+    save_settings(Settings(zip_compression_level=2), tmp_config)
+    captured = []
+    real_run_job = runner_mod.run_job
+
+    def spy(
+        job,
+        *,
+        config_dir=None,
+        data_dir=None,
+        on_progress=None,
+        clock=None,
+        zip_compression_level=6,
+    ):
+        captured.append(zip_compression_level)
+        return real_run_job(
+            job,
+            config_dir=config_dir,
+            data_dir=data_dir,
+            on_progress=on_progress,
+            clock=clock,
+            zip_compression_level=zip_compression_level,
+        )
+
+    monkeypatch.setattr(runner_mod, "run_job", spy)
+    jobs = [_make_job(0, sample_tree, tmp_path / "d0")]
+    run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=1)
+    assert captured == [2]
+
+
+def test_run_jobs_batch_explicit_level_overrides_settings(
+    sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch
+):
+    from abackup.config import save_settings
+    from abackup.models import Settings
+
+    import abackup.core.runner as runner_mod
+
+    save_settings(Settings(zip_compression_level=2), tmp_config)
+    captured = []
+    real_run_job = runner_mod.run_job
+
+    def spy(
+        job,
+        *,
+        config_dir=None,
+        data_dir=None,
+        on_progress=None,
+        clock=None,
+        zip_compression_level=6,
+    ):
+        captured.append(zip_compression_level)
+        return real_run_job(
+            job,
+            config_dir=config_dir,
+            data_dir=data_dir,
+            on_progress=on_progress,
+            clock=clock,
+            zip_compression_level=zip_compression_level,
+        )
+
+    monkeypatch.setattr(runner_mod, "run_job", spy)
+    jobs = [_make_job(0, sample_tree, tmp_path / "d0")]
+    run_jobs_batch(
+        jobs,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        max_workers=1,
+        zip_compression_level=7,
+    )
+    assert captured == [7]

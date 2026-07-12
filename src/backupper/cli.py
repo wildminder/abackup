@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from abackup import __version__
 from abackup.config import load_jobs, load_settings, save_settings
+from abackup.core.paths import get_config_dir
 from abackup.core.runner import run_jobs_batch
 from abackup.tui.app import ABackupApp
 
@@ -34,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Number of concurrent backup workers (default: settings.max_workers)",
     )
+    parser.add_argument(
+        "--show-settings",
+        action="store_true",
+        help="Print the resolved config directory and current settings as JSON, then exit",
+    )
     return parser
 
 
@@ -47,6 +54,11 @@ def _print_batch_summary(results) -> None:
 
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
+    if args.show_settings:
+        config_dir = get_config_dir(args.config_dir)
+        settings = load_settings(args.config_dir)
+        print(json.dumps({"config_dir": str(config_dir), **settings.to_dict()}, indent=2))
+        return
     if args.reset:
         if args.config_dir is None:
             raise SystemExit("--reset requires --config-dir")

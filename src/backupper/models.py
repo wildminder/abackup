@@ -38,6 +38,7 @@ class Settings:
     default_destination: str | None = None
     log_level: str = "INFO"
     max_workers: int = 4
+    zip_compression_level: int = 6
     created_at: str = field(default_factory=lambda: _now().isoformat())
 
     def to_dict(self) -> dict[str, Any]:
@@ -47,6 +48,15 @@ class Settings:
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
         return cls(**known)
+
+    def validate(self) -> None:
+        """Raise ``ConfigError`` if any field is out of its valid range."""
+        if not (0 <= self.zip_compression_level <= 9):
+            raise ConfigError("zip_compression_level must be between 0 and 9")
+        if self.max_workers < 1:
+            raise ConfigError("max_workers must be >= 1")
+        if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+            raise ConfigError("log_level must be one of DEBUG/INFO/WARNING/ERROR")
 
     @property
     def is_first_run(self) -> bool:

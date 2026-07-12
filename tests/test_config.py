@@ -6,6 +6,8 @@ from abackup.config import (
     load_jobs,
     save_jobs,
     init_storage,
+    relocate_storage,
+    maybe_migrate_legacy_config,
 )
 from abackup.models import BackupJob, BackupMethod, Settings
 from abackup.utils.errors import ConfigError
@@ -54,3 +56,59 @@ def test_atomic_write_leaves_no_tmp(tmp_config):
     save_settings(Settings(), tmp_config)
     leftovers = list(__import__("pathlib").Path(tmp_config).glob("*.tmp"))
     assert leftovers == []
+
+
+def test_relocate_storage_moves_settings_and_jobs(tmp_path):
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "settings.json").write_text('{"a": 1}', encoding="utf-8")
+    (old / "jobs.json").write_text("[]", encoding="utf-8")
+    new = tmp_path / "new"
+    relocate_storage(old, new)
+    assert (new / "settings.json").exists()
+    assert (new / "jobs.json").exists()
+    assert not (old / "settings.json").exists()
+    assert not (old / "jobs.json").exists()
+
+
+def test_relocate_storage_creates_new_dir(tmp_path):
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "settings.json").write_text("{}", encoding="utf-8")
+    new = tmp_path / "new" / "nested"
+    relocate_storage(old, new)
+    assert new.is_dir()
+    assert (new / "settings.json").exists()
+
+
+def test_relocate_storage_idempotent_when_same_dir(tmp_path):
+    old = tmp_path / "same"
+    old.mkdir()
+    (old / "settings.json").write_text("{}", encoding="utf-8")
+    # No exception, file remains in place.
+    relocate_storage(old, old)
+    assert (old / "settings.json").exists()
+
+
+def test_relocate_storage_leaves_no_tmp(tmp_path):
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "settings.json").write_text("{}", encoding="utf-8")
+    (old / "jobs.json").write_text("[]", encoding="utf-8")
+    new = tmp_path / "new"
+    relocate_storage(old, new)
+    assert list(tmp_path.rglob("*.tmp")) == []
+
+
+def test_legacy_migration_moves_files(tmp_path, monkeypatch):
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / "settings.json").write_text('{"first_run_completed": true}', encoding="utf-8")
+    (legacy / "jobs.json").write_text("[]", encoding="utf-8")
+    new = tmp_path / "newhome" / "abackup"
+    monkeypatch.setattr("abackup.config.LEGACY_DIR", legacy)
+    monkeypatch.setattr("abackup.config.default_config_dir", lambda: new)
+    maybe_migrate_legacy_config()
+    assert (new / "settings.json").exists()
+    assert (new / "jobs.json").exists()
+    assert not (legacy / "settings.json").exists()

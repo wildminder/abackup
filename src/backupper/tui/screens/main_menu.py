@@ -27,6 +27,7 @@ class MainMenuScreen(Screen):
             Button("Run selected", id="run"),
             Button("Run all", id="run_all", variant="success"),
             Button("Delete selected", id="delete", variant="error"),
+            Button("Settings", id="settings"),
             Button("Quit", id="quit"),
         )
         yield Static("", id="status")
@@ -58,6 +59,11 @@ class MainMenuScreen(Screen):
             from abackup.tui.screens.run_all import RunAllScreen
 
             self.app.push_screen(RunAllScreen(self.config_dir, self.data_dir))
+            return
+        if event.button.id == "settings":
+            from abackup.tui.screens.settings import SettingsScreen
+
+            self.app.push_screen(SettingsScreen(self.config_dir, self.data_dir))
             return
         if event.button.id == "quit":
             self.app.exit()

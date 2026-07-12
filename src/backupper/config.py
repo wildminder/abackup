@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import platformdirs
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -13,9 +14,13 @@ from abackup.core.paths import (
     ensure_dir,
     settings_file_path,
     jobs_file_path,
+    default_config_dir,
 )
 from abackup.models import Settings, BackupJob
 from abackup.utils.errors import ConfigError
+
+# Previous default location (platformdirs). Used only for one-time migration.
+LEGACY_DIR = Path(platformdirs.user_config_dir("abackup", "abackup"))
 
 
 def _atomic_write(path: Path, data: Any) -> None:
@@ -73,8 +78,44 @@ def save_jobs(jobs: list[BackupJob], config_dir: str | Path | None = None) -> Pa
     return path
 
 
+def relocate_storage(old_dir, new_dir) -> Path:
+    """Atomically move ``settings.json`` + ``jobs.json`` from old to new dir.
+
+    Creates the new directory and uses ``os.replace`` (atomic) for each file.
+    If ``old_dir`` already equals ``new_dir`` this is a no-op. Returns the new
+    config dir.
+    """
+    old = Path(old_dir)
+    new = Path(new_dir)
+    if old.resolve() == new.resolve():
+        return new
+    ensure_dir(new)
+    for name in ("settings.json", "jobs.json"):
+        src = old / name
+        if src.exists():
+            os.replace(src, new / name)
+    return new
+
+
+def maybe_migrate_legacy_config() -> None:
+    """One-time migration from the old ``platformdirs`` location to the new
+    home-based default. No-op if the new location already has settings or the
+    legacy location is empty."""
+    new_default = default_config_dir()
+    if settings_file_path(new_default).exists():
+        return
+    if settings_file_path(LEGACY_DIR).exists():
+        relocate_storage(LEGACY_DIR, new_default)
+
+
 def init_storage(config_dir: str | Path | None = None) -> Path:
-    """Ensure config dir + default settings exist. Returns config dir."""
+    """Ensure config dir + default settings exist. Returns config dir.
+
+    When no explicit ``config_dir`` is given, any data from the legacy
+    ``platformdirs`` location is migrated to the new home-based default first.
+    """
+    if config_dir is None:
+        maybe_migrate_legacy_config()
     config_dir = get_config_dir(config_dir)
     ensure_dir(config_dir)
     if not settings_file_path(config_dir).exists():

@@ -42,3 +42,25 @@ def test_make_zip_bad_destination_raises(sample_tree, tmp_path):
     except DestinationError:
         return
     raise AssertionError("expected DestinationError")
+
+
+def test_make_zip_level_store_larger_than_max(sample_tree, dest_dir):
+    # Highly compressible content isolates the effect of the level.
+    (sample_tree / "big.txt").write_text("A" * 100_000, encoding="utf-8")
+    store = make_zip(
+        sample_tree, dest_dir / "store", when=date(2026, 7, 12), compress_level=0
+    )
+    maxed = make_zip(
+        sample_tree, dest_dir / "max", when=date(2026, 7, 12), compress_level=9
+    )
+    assert store.stat().st_size > maxed.stat().st_size
+
+
+def test_make_zip_level_is_deterministic(sample_tree, dest_dir):
+    a = make_zip(
+        sample_tree, dest_dir / "a", when=date(2026, 7, 12), compress_level=9
+    )
+    b = make_zip(
+        sample_tree, dest_dir / "b", when=date(2026, 7, 12), compress_level=9
+    )
+    assert a.read_bytes() == b.read_bytes()
