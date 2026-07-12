@@ -52,6 +52,21 @@ async def test_add_job_wizard_rejects_missing_source(tmp_config, tmp_data, dest_
         assert load_jobs(tmp_config) == []
 
 
+async def test_add_job_wizard_cancel_returns_to_main_menu(tmp_config, tmp_data):
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        await pilot.click("#add")
+        await pilot.pause()
+        assert isinstance(app.screen, FirstRunScreen)
+
+        # Cancel returns to the main menu without creating a job.
+        await pilot.click("#cancel")
+        await pilot.pause()
+        assert isinstance(app.screen, MainMenuScreen)
+        assert load_jobs(tmp_config) == []
+
+
 async def test_main_menu_shows_empty_state(tmp_config, tmp_data):
     # No jobs configured -> app still opens on the main window with an empty
     # table and a clear hint, instead of forcing a first-run wizard.

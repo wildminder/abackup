@@ -29,9 +29,15 @@ class FirstRunScreen(Screen):
             yield RadioButton("Direct copy", value=True, id="copy")
             yield RadioButton("Zip archive", id="zip")
         yield Static("", id="error")
-        yield Button("Save", id="save", variant="primary")
+        yield Horizontal(
+            Button("Save", id="save", variant="primary"),
+            Button("Cancel", id="cancel"),
+        )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel":
+            self.app.pop_screen()
+            return
         if event.button.id != "save":
             return
         source = self.query_one("#source", Input).value.strip()
