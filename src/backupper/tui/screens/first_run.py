@@ -8,8 +8,7 @@ from textual.containers import Vertical, Horizontal
 from textual.screen import Screen
 from textual.widgets import Input, Button, Label, RadioSet, RadioButton, Static
 
-from abackup.config import load_jobs, save_jobs, load_settings, save_settings
-from abackup.core.discovery import mark_first_run_done
+from abackup.config import load_jobs, save_jobs
 from abackup.models import BackupJob, BackupMethod
 
 
@@ -20,7 +19,7 @@ class FirstRunScreen(Screen):
         self.data_dir = data_dir
 
     def compose(self):
-        yield Label("First run setup", id="title")
+        yield Label("Add backup job", id="title")
         yield Label("Source folder (to back up):")
         yield Input(placeholder="C:/Users/art/Documents", id="source")
         yield Label("Destination folder:")
@@ -55,8 +54,6 @@ class FirstRunScreen(Screen):
         job = BackupJob(source=source, destination=dest, method=method)
         jobs = load_jobs(self.config_dir) + [job]
         save_jobs(jobs, self.config_dir)
-        settings = mark_first_run_done(load_settings(self.config_dir))
-        save_settings(settings, self.config_dir)
         from abackup.tui.screens.main_menu import MainMenuScreen
 
         self.app.push_screen(MainMenuScreen(self.config_dir, self.data_dir))

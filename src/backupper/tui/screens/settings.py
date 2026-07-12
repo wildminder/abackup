@@ -126,7 +126,6 @@ class SettingsScreen(Screen):
 
         updated = Settings(
             schema_version=self._existing.schema_version,
-            first_run_completed=self._existing.first_run_completed,
             default_destination=default_dest,
             log_level=log_level,
             max_workers=workers,

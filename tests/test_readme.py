@@ -15,7 +15,6 @@ def test_readme_mentions_commands():
     text = readme.read_text(encoding="utf-8")
     for token in [
         "abackup",
-        "--reset",
         "--config-dir",
         "Direct copy",
         "Zip archive",
@@ -39,8 +38,7 @@ def test_readme_mentions_commands():
 
 def test_parser_exposes_all_flags():
     args = build_parser().parse_args(
-        ["--config-dir", "x", "--data-dir", "y", "--reset"]
+        ["--config-dir", "x", "--data-dir", "y"]
     )
     assert args.config_dir == "x"
     assert args.data_dir == "y"
-    assert args.reset is True

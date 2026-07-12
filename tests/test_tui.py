@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from textual.widgets import Input, RadioButton, Static, Button, ProgressBar
+from textual.widgets import Input, RadioButton, Static, Button, ProgressBar, ListView
 
 from abackup.cli import ABackupApp
 from abackup.config import load_jobs, load_settings, save_jobs, save_settings
@@ -12,12 +12,17 @@ from abackup.tui.screens.run_all import RunAllScreen
 from abackup.tui.screens.settings import SettingsScreen
 
 
-async def test_first_run_wizard_creates_job_and_settings(
+async def test_add_job_wizard_creates_job(
     tmp_config, tmp_data, sample_tree, dest_dir
 ):
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
+        # App opens directly on the main window (no first-run gate).
+        assert isinstance(app.screen, MainMenuScreen)
+        await pilot.click("#add")
+        await pilot.pause()
         assert isinstance(app.screen, FirstRunScreen)
+
         app.screen.query_one("#source", Input).value = str(sample_tree)
         app.screen.query_one("#dest", Input).value = str(dest_dir)
         app.screen.query_one("#zip", RadioButton).value = True
@@ -28,19 +33,34 @@ async def test_first_run_wizard_creates_job_and_settings(
         jobs = load_jobs(tmp_config)
         assert len(jobs) == 1
         assert jobs[0].method.value == "zip"
-        assert load_settings(tmp_config).first_run_completed is True
 
 
-async def test_first_run_wizard_rejects_missing_source(tmp_config, tmp_data, dest_dir):
+async def test_add_job_wizard_rejects_missing_source(tmp_config, tmp_data, dest_dir):
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        await pilot.click("#add")
+        await pilot.pause()
+        assert isinstance(app.screen, FirstRunScreen)
+
         app.screen.query_one("#source", Input).value = str(dest_dir / "does_not_exist")
         app.screen.query_one("#dest", Input).value = str(dest_dir)
         await pilot.click("#save")
         await pilot.pause()
-        # Still on first-run screen, no job created.
+        # Still on the add-job screen, no job created.
         assert isinstance(app.screen, FirstRunScreen)
         assert load_jobs(tmp_config) == []
+
+
+async def test_main_menu_shows_empty_state(tmp_config, tmp_data):
+    # No jobs configured -> app still opens on the main window with an empty
+    # table and a clear hint, instead of forcing a first-run wizard.
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        status = app.screen.query_one("#status", Static)
+        assert "No jobs yet" in str(status.render())
+        assert len(app.screen.query_one("#jobs", ListView).children) == 0
 
 
 async def test_run_job_screen_updates_status(
@@ -50,7 +70,7 @@ async def test_run_job_screen_updates_status(
         source=str(sample_tree), destination=str(dest_dir / "out"), method="copy"
     )
     save_jobs([job], tmp_config)
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
 
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
@@ -68,7 +88,7 @@ async def test_main_menu_delete(tmp_config, tmp_data, sample_tree, dest_dir):
         source=str(sample_tree), destination=str(dest_dir), method="copy"
     )
     save_jobs([job], tmp_config)
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
 
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
@@ -83,7 +103,7 @@ async def test_main_menu_run_button(tmp_config, tmp_data, sample_tree, dest_dir)
         source=str(sample_tree), destination=str(dest_dir / "out"), method="copy"
     )
     save_jobs([job], tmp_config)
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
 
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
@@ -97,7 +117,7 @@ async def test_main_menu_run_button(tmp_config, tmp_data, sample_tree, dest_dir)
 
 
 async def test_main_menu_add_button(tmp_config, tmp_data):
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         assert isinstance(app.screen, MainMenuScreen)
@@ -111,7 +131,7 @@ async def test_main_menu_run_all_button(tmp_config, tmp_data, sample_tree, dest_
         source=str(sample_tree), destination=str(dest_dir), method="copy"
     )
     save_jobs([job], tmp_config)
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         assert isinstance(app.screen, MainMenuScreen)
@@ -142,7 +162,7 @@ async def test_run_all_screen_completes_all(tmp_config, tmp_data, sample_tree, t
         for i in range(3)
     ]
     save_jobs(jobs, tmp_config)
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         assert isinstance(app.screen, MainMenuScreen)
@@ -167,7 +187,7 @@ async def test_run_all_screen_shows_failure(tmp_config, tmp_data, sample_tree, t
         name="bad",
     )
     save_jobs([good, bad], tmp_config)
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         assert isinstance(app.screen, MainMenuScreen)
@@ -179,7 +199,7 @@ async def test_run_all_screen_shows_failure(tmp_config, tmp_data, sample_tree, t
 
 
 async def test_run_all_screen_empty(tmp_config, tmp_data):
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         assert isinstance(app.screen, MainMenuScreen)
@@ -195,7 +215,7 @@ async def test_run_all_screen_back_button(tmp_config, tmp_data, sample_tree, des
         source=str(sample_tree), destination=str(dest_dir / "out"), method="copy"
     )
     save_jobs([job], tmp_config)
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         assert isinstance(app.screen, MainMenuScreen)
@@ -207,7 +227,7 @@ async def test_run_all_screen_back_button(tmp_config, tmp_data, sample_tree, des
 
 
 async def test_main_menu_settings_button(tmp_config, tmp_data):
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         assert isinstance(app.screen, MainMenuScreen)
@@ -217,7 +237,7 @@ async def test_main_menu_settings_button(tmp_config, tmp_data):
 
 
 async def test_settings_change_compression_level(tmp_config, tmp_data):
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         assert isinstance(app.screen, MainMenuScreen)
@@ -231,7 +251,7 @@ async def test_settings_change_compression_level(tmp_config, tmp_data):
 
 
 async def test_settings_validation_error_stays(tmp_config, tmp_data):
-    save_settings(Settings(first_run_completed=True, zip_compression_level=6), tmp_config)
+    save_settings(Settings(zip_compression_level=6), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         app.push_screen(SettingsScreen(tmp_config, tmp_data))
@@ -245,7 +265,7 @@ async def test_settings_validation_error_stays(tmp_config, tmp_data):
 
 
 async def test_settings_relocate_on_save(tmp_config, tmp_data, tmp_path):
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
     save_jobs([BackupJob(source="C:/x", destination="D:/y", method="copy")], tmp_config)
     new_dir = tmp_path / "newloc"
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
@@ -398,7 +418,7 @@ async def test_run_all_screen_shows_realtime_progress(tmp_config, tmp_data, monk
         BackupJob(source="C:/x", destination="D:/y", method="copy", name="jobB"),
     ]
     save_jobs(jobs, tmp_config)
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
 
     def fake_run_jobs_batch(
         jobs,
@@ -462,7 +482,7 @@ async def test_run_all_screen_shows_realtime_progress(tmp_config, tmp_data, monk
 
 
 async def test_settings_cancel_no_change(tmp_config, tmp_data):
-    save_settings(Settings(first_run_completed=True, zip_compression_level=6), tmp_config)
+    save_settings(Settings(zip_compression_level=6), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         app.push_screen(SettingsScreen(tmp_config, tmp_data))
@@ -475,7 +495,7 @@ async def test_settings_cancel_no_change(tmp_config, tmp_data):
 
 
 async def test_settings_fields_are_labeled(tmp_config, tmp_data):
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         app.push_screen(SettingsScreen(tmp_config, tmp_data))
@@ -501,7 +521,7 @@ async def test_settings_actions_visible_above_footer(tmp_config, tmp_data):
     from textual.containers import ScrollableContainer, Horizontal
     from textual.widgets import Footer
 
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         app.push_screen(SettingsScreen(tmp_config, tmp_data))
@@ -527,8 +547,7 @@ async def test_app_resolves_default_config_dir(tmp_data):
     async with app.run_test() as pilot:
         await pilot.pause()
         assert app.config_dir is not None
-        # The resolved dir is propagated to whichever screen is shown
-        # (FirstRunScreen on a fresh install, MainMenuScreen otherwise).
+        # The resolved dir is propagated to the main window on startup.
         assert app.screen.config_dir == app.config_dir
 
 

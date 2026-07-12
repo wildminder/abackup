@@ -14,13 +14,13 @@ from abackup.utils.errors import ConfigError
 
 
 def test_settings_save_load_round_trip(tmp_config):
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(default_destination="D:/x"), tmp_config)
     loaded = load_settings(tmp_config)
-    assert loaded.first_run_completed is True
+    assert loaded.default_destination == "D:/x"
 
 
 def test_load_settings_missing_returns_default(tmp_config):
-    assert load_settings(tmp_config).first_run_completed is False
+    assert load_settings(tmp_config).default_destination is None
 
 
 def test_load_settings_corrupt_raises(tmp_config):
@@ -47,9 +47,11 @@ def test_load_jobs_missing_returns_empty(tmp_config):
 
 def test_init_storage_creates_defaults(tmp_config):
     init_storage(tmp_config)
-    assert (json.loads((__import__("pathlib").Path(tmp_config) / "settings.json").read_text()))[
-        "first_run_completed"
-    ] is False
+    data = json.loads(
+        (__import__("pathlib").Path(tmp_config) / "settings.json").read_text()
+    )
+    assert data["schema_version"] == 1
+    assert data["max_workers"] == 4
 
 
 def test_atomic_write_leaves_no_tmp(tmp_config):

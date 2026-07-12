@@ -3,7 +3,9 @@
 A full-featured CLI backup application with a proper **terminal user interface (TUI)**
 built with [Textual](https://textual.textualize.io/).
 
-On first run, ABackup interactively asks for:
+ABackup opens directly on the **main window**, which lists your backup jobs
+(showing an empty table with a "No jobs yet. Add one." hint when none exist).
+Use **Add job** to create a job; the add-job form interactively asks for:
 
 1. **Source folder** — the local folder to back up.
 2. **Destination folder** — where backups are written.
@@ -39,7 +41,6 @@ python -m abackup
 | `--version` | Print version and exit. |
 | `--config-dir DIR` | Override the config directory (useful for portable / automated use). |
 | `--data-dir DIR` | Override the data directory (logs, manifests). |
-| `--reset` | Reset the first-run flag so the setup wizard shows again (requires `--config-dir`). |
 | `--run-all` | Run every configured job non-interactively and print a summary (requires `--config-dir`). |
 | `--workers N` | Number of concurrent backup workers for `--run-all` (default: `max_workers` setting). |
 | `--show-settings` | Print the resolved config directory and current settings as JSON, then exit. |
@@ -48,7 +49,6 @@ Example (portable / automated):
 
 ```bash
 abackup --config-dir ./my-config --data-dir ./my-data
-abackup --reset --config-dir ./my-config
 abackup --run-all --config-dir ./my-config --workers 4
 ```
 
@@ -113,7 +113,7 @@ python -m abackup --show-settings
 (overridable with `--config-dir` or the Settings screen). `<data>` defaults to
 `<config>` unless `--data-dir` is given.
 
-- **Settings:** `<config>/settings.json` (first-run flag, defaults).
+- **Settings:** `<config>/settings.json` (global defaults).
 - **Jobs:** `<config>/jobs.json` (array of backup jobs).
 - **Run logs:** `<data>/logs/<job_id>.jsonl`.
 - **Manifests:** `<data>/manifests/<job_id>.json`.
@@ -135,7 +135,7 @@ pytest --cov=src/abackup --cov-fail-under=90
 - `abackup/core/*` — framework-agnostic, fully unit-tested backup logic.
 - `abackup/models.py` — `Settings` / `BackupJob` / `BackupMethod`.
 - `abackup/config.py` — atomic JSON persistence.
-- `abackup/tui/*` — Textual screens (first-run wizard, main menu, run-job).
+- `abackup/tui/*` — Textual screens (add-job wizard, main menu, run-job).
 - `abackup/cli.py` — entry point and flags.
 
 Determinism: timestamps are injectable, IDs use `uuid5` (not random), and zip

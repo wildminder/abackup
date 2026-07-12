@@ -1,7 +1,7 @@
 import pytest
 
 from abackup.cli import build_parser, main
-from abackup.config import init_storage, load_settings, save_settings, load_jobs, save_jobs
+from abackup.config import load_settings, save_settings, load_jobs, save_jobs
 from abackup.models import BackupJob, Settings
 
 
@@ -15,19 +15,6 @@ def test_version(capsys):
 def test_parser_defaults():
     args = build_parser().parse_args([])
     assert args.config_dir is None
-    assert args.reset is False
-
-
-def test_reset_flips_first_run(tmp_config):
-    init_storage(tmp_config)
-    save_settings(Settings(first_run_completed=True), tmp_config)
-    main(["--reset", "--config-dir", tmp_config])
-    assert load_settings(tmp_config).first_run_completed is False
-
-
-def test_reset_requires_config_dir():
-    with pytest.raises(SystemExit):
-        main(["--reset"])
 
 
 def test_cli_run_all_runs_every_job(tmp_config, tmp_data, sample_tree, tmp_path, capsys):
@@ -41,7 +28,7 @@ def test_cli_run_all_runs_every_job(tmp_config, tmp_data, sample_tree, tmp_path,
         for i in range(2)
     ]
     save_jobs(jobs, tmp_config)
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
 
     main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data])
     out = capsys.readouterr().out
@@ -52,7 +39,7 @@ def test_cli_run_all_runs_every_job(tmp_config, tmp_data, sample_tree, tmp_path,
 
 
 def test_cli_run_all_empty(tmp_config, tmp_data, capsys):
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
     main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data])
     assert "No jobs configured" in capsys.readouterr().out
 
@@ -67,7 +54,7 @@ def test_cli_workers_flag(tmp_config, tmp_data, sample_tree, tmp_path, monkeypat
         )
     ]
     save_jobs(jobs, tmp_config)
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
 
     captured = {}
 
@@ -81,7 +68,7 @@ def test_cli_workers_flag(tmp_config, tmp_data, sample_tree, tmp_path, monkeypat
 
 
 def test_cli_show_settings(tmp_config, tmp_data, capsys):
-    save_settings(Settings(first_run_completed=True, zip_compression_level=7), tmp_config)
+    save_settings(Settings(zip_compression_level=7), tmp_config)
     main(["--show-settings", "--config-dir", tmp_config])
     out = capsys.readouterr().out
     assert "config_dir" in out
@@ -96,7 +83,7 @@ def test_cli_show_settings_reflects_default_location(tmp_config, tmp_data, capsy
     import abackup.cli as cli_mod
 
     monkeypatch.setattr(cli_mod, "get_config_dir", lambda override=None: tmp_config)
-    save_settings(Settings(first_run_completed=True), tmp_config)
+    save_settings(Settings(), tmp_config)
     main(["--show-settings"])
     out = capsys.readouterr().out
     data = _json.loads(out)

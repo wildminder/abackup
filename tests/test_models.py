@@ -3,16 +3,10 @@ from abackup.utils.errors import ConfigError
 
 
 def test_settings_round_trip():
-    s = Settings(first_run_completed=True, default_destination="D:/x")
+    s = Settings(default_destination="D:/x")
     d = s.to_dict()
     s2 = Settings.from_dict(d)
-    assert s2.first_run_completed is True
     assert s2.default_destination == "D:/x"
-    assert s2.is_first_run is False
-
-
-def test_settings_defaults_first_run():
-    assert Settings().is_first_run is True
 
 
 def test_backup_method_from_str_invalid():
@@ -60,9 +54,8 @@ def test_settings_max_workers_round_trip():
 
 def test_settings_from_dict_keeps_default_without_field():
     # Old settings.json (no max_workers) must still load with the default.
-    s = Settings.from_dict({"first_run_completed": True})
+    s = Settings.from_dict({})
     assert s.max_workers == 4
-    assert s.first_run_completed is True
 
 
 def test_zip_level_default_6():
@@ -76,7 +69,7 @@ def test_zip_level_round_trip():
 
 def test_settings_from_dict_defaults_level():
     # Old settings.json (no zip_compression_level) loads with default 6.
-    s = Settings.from_dict({"first_run_completed": True})
+    s = Settings.from_dict({})
     assert s.zip_compression_level == 6
 
 

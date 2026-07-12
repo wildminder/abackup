@@ -7,9 +7,7 @@ from pathlib import Path
 from textual.app import App
 
 from abackup.config import init_storage, load_settings
-from abackup.core.discovery import is_first_run
 from abackup.core.paths import get_data_dir
-from abackup.tui.screens.first_run import FirstRunScreen
 from abackup.tui.screens.main_menu import MainMenuScreen
 
 
@@ -35,8 +33,4 @@ class ABackupApp(App):
     def on_mount(self) -> None:
         self.config_dir = init_storage(self.config_dir)
         self.data_dir = get_data_dir(self.data_dir)
-        settings = load_settings(self.config_dir)
-        if is_first_run(settings):
-            self.push_screen(FirstRunScreen(self.config_dir, self.data_dir))
-        else:
-            self.push_screen(MainMenuScreen(self.config_dir, self.data_dir))
+        self.push_screen(MainMenuScreen(self.config_dir, self.data_dir))

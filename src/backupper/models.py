@@ -34,7 +34,6 @@ def _now() -> datetime:
 @dataclass
 class Settings:
     schema_version: int = 1
-    first_run_completed: bool = False
     default_destination: str | None = None
     log_level: str = "INFO"
     max_workers: int = 4
@@ -57,10 +56,6 @@ class Settings:
             raise ConfigError("max_workers must be >= 1")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
             raise ConfigError("log_level must be one of DEBUG/INFO/WARNING/ERROR")
-
-    @property
-    def is_first_run(self) -> bool:
-        return not self.first_run_completed
 
 
 @dataclass

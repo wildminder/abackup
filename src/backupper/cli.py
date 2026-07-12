@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from abackup import __version__
-from abackup.config import load_jobs, load_settings, save_settings
+from abackup.config import load_jobs, load_settings
 from abackup.core.paths import get_config_dir
 from abackup.core.runner import run_jobs_batch
 from abackup.tui.app import ABackupApp
@@ -20,11 +20,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"abackup {__version__}")
     parser.add_argument("--config-dir", default=None, help="Override config directory")
     parser.add_argument("--data-dir", default=None, help="Override data directory")
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="Reset first-run flag so the setup wizard shows again",
-    )
     parser.add_argument(
         "--run-all",
         action="store_true",
@@ -58,13 +53,6 @@ def main(argv=None) -> None:
         config_dir = get_config_dir(args.config_dir)
         settings = load_settings(args.config_dir)
         print(json.dumps({"config_dir": str(config_dir), **settings.to_dict()}, indent=2))
-        return
-    if args.reset:
-        if args.config_dir is None:
-            raise SystemExit("--reset requires --config-dir")
-        settings = load_settings(args.config_dir)
-        settings.first_run_completed = False
-        save_settings(settings, args.config_dir)
         return
     if args.run_all:
         if args.config_dir is None:
