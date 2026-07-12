@@ -16,6 +16,31 @@ _LOG_LEVELS = [("DEBUG", "DEBUG"), ("INFO", "INFO"), ("WARNING", "WARNING"), ("E
 
 
 class SettingsScreen(Screen):
+    CSS = """
+    #title {
+        padding: 1 2 0 2;
+        text-style: bold;
+        width: 100%;
+    }
+    .field {
+        padding: 0 2;
+        height: auto;
+    }
+    .field-label {
+        text-style: bold;
+        padding: 1 0 0 0;
+    }
+    .field-hint {
+        color: $text-muted;
+        padding: 0 0 1 0;
+    }
+    #error {
+        padding: 0 2;
+        color: $error;
+        height: 1;
+    }
+    """
+
     def __init__(self, config_dir, data_dir):
         super().__init__()
         self.config_dir = config_dir
@@ -25,11 +50,35 @@ class SettingsScreen(Screen):
     def compose(self):
         yield Header()
         yield Label("Settings", id="title")
-        yield Input(id="config_dir", placeholder="Storage directory")
-        yield Input(id="zip_level", placeholder="Zip compression level (0-9)")
-        yield Input(id="workers", placeholder="Max concurrent workers")
-        yield Select(_LOG_LEVELS, id="log_level", prompt="Log level")
-        yield Input(id="default_dest", placeholder="Default destination (optional)")
+        yield Vertical(
+            Label("Storage directory", classes="field-label"),
+            Input(id="config_dir", placeholder="e.g. C:\\Users\\me\\abackup"),
+            Static("Where jobs, settings and logs are stored. Changing it moves all data.", classes="field-hint"),
+            classes="field",
+        )
+        yield Vertical(
+            Label("Zip compression level (0-9)", classes="field-label"),
+            Input(id="zip_level", placeholder="0 = store, 9 = max, default 6"),
+            Static("Used by the 'zip' backup method.", classes="field-hint"),
+            classes="field",
+        )
+        yield Vertical(
+            Label("Max concurrent workers", classes="field-label"),
+            Input(id="workers", placeholder="default 4"),
+            Static("How many jobs run at once with 'Run all jobs'.", classes="field-hint"),
+            classes="field",
+        )
+        yield Vertical(
+            Label("Log level", classes="field-label"),
+            Select(_LOG_LEVELS, id="log_level", prompt="Log level"),
+            classes="field",
+        )
+        yield Vertical(
+            Label("Default destination (optional)", classes="field-label"),
+            Input(id="default_dest", placeholder="pre-filled for new jobs"),
+            Static("Used as the destination when creating a new job.", classes="field-hint"),
+            classes="field",
+        )
         yield Static("", id="error")
         yield Horizontal(
             Button("Save", id="save", variant="primary"),

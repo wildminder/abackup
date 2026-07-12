@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from textual.widgets import Input, RadioButton, Static
+from textual.widgets import Input, RadioButton, Static, Button
 
 from abackup.cli import ABackupApp
 from abackup.config import load_jobs, load_settings, save_jobs, save_settings
@@ -224,7 +224,7 @@ async def test_settings_change_compression_level(tmp_config, tmp_data):
         app.push_screen(SettingsScreen(tmp_config, tmp_data))
         await pilot.pause()
         app.screen.query_one("#zip_level", Input).value = "9"
-        await pilot.click("#save")
+        app.screen.query_one("#save", Button).press()
         await pilot.pause()
         assert load_settings(tmp_config).zip_compression_level == 9
         assert isinstance(app.screen, MainMenuScreen)
@@ -237,7 +237,7 @@ async def test_settings_validation_error_stays(tmp_config, tmp_data):
         app.push_screen(SettingsScreen(tmp_config, tmp_data))
         await pilot.pause()
         app.screen.query_one("#zip_level", Input).value = "99"
-        await pilot.click("#save")
+        app.screen.query_one("#save", Button).press()
         await pilot.pause()
         # Invalid value -> stays on settings, file unchanged.
         assert isinstance(app.screen, SettingsScreen)
@@ -253,7 +253,7 @@ async def test_settings_relocate_on_save(tmp_config, tmp_data, tmp_path):
         app.push_screen(SettingsScreen(tmp_config, tmp_data))
         await pilot.pause()
         app.screen.query_one("#config_dir", Input).value = str(new_dir)
-        await pilot.click("#save")
+        app.screen.query_one("#save", Button).press()
         await pilot.pause()
         assert (new_dir / "settings.json").exists()
         assert (new_dir / "jobs.json").exists()
@@ -269,7 +269,24 @@ async def test_settings_cancel_no_change(tmp_config, tmp_data):
         app.push_screen(SettingsScreen(tmp_config, tmp_data))
         await pilot.pause()
         app.screen.query_one("#zip_level", Input).value = "1"
-        await pilot.click("#cancel")
+        app.screen.query_one("#cancel", Button).press()
         await pilot.pause()
         assert isinstance(app.screen, MainMenuScreen)
         assert load_settings(tmp_config).zip_compression_level == 6
+
+
+async def test_settings_fields_are_labeled(tmp_config, tmp_data):
+    save_settings(Settings(first_run_completed=True), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(tmp_config, tmp_data))
+        await pilot.pause()
+        labels = {str(w.render()) for w in app.screen.query(".field-label")}
+        for expected in [
+            "Storage directory",
+            "Zip compression level (0-9)",
+            "Max concurrent workers",
+            "Log level",
+            "Default destination (optional)",
+        ]:
+            assert expected in labels
