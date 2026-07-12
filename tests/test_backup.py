@@ -22,7 +22,9 @@ def test_run_job_copy(sample_tree, dest_dir, tmp_config, tmp_data):
 
 def test_run_job_zip(sample_tree, dest_dir, tmp_config, tmp_data):
     job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="zip")
-    result = run_job(job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock)
+    result = run_job(
+        job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock, prefer_7z=False
+    )
     assert result.status == "success"
     assert "archive" in result.summary
 
@@ -52,11 +54,11 @@ def test_run_job_uses_compression_level(sample_tree, dest_dir, tmp_config, tmp_d
 
     captured = {}
 
-    def fake_make_zip(source, destination, *, when=None, compress_level=6, cancel=None, job_id="", on_progress=None, log=None):
+    def fake_make_archive(source, destination, *, when=None, compress_level=6, cancel=None, job_id="", on_progress=None, prefer_7z=True):
         captured["compress_level"] = compress_level
         return Path(destination) / "x.zip"
 
-    monkeypatch.setattr(backup_mod, "make_zip", fake_make_zip)
+    monkeypatch.setattr(backup_mod, "make_archive", fake_make_archive)
     job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="zip")
     run_job(
         job,
@@ -117,6 +119,7 @@ def test_run_job_zip_emits_progress(sample_tree, dest_dir, tmp_config, tmp_data)
         config_dir=tmp_config,
         data_dir=tmp_data,
         clock=_clock,
+        prefer_7z=False,
         on_progress=lambda p: seen.append(p),
     )
     assert any(p.phase == "zipping" for p in seen)
@@ -168,7 +171,12 @@ def test_run_job_cancel_zip_mid_run(sample_tree, dest_dir, tmp_config, tmp_data,
     monkeypatch.setattr(archive_mod, "open", fake_open, raising=False)
     job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="zip")
     result = run_job(
-        job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock, cancel=cancel
+        job,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        clock=_clock,
+        prefer_7z=False,
+        cancel=cancel,
     )
     assert result.status == "cancelled"
     assert result.updated_job.last_status == "cancelled"

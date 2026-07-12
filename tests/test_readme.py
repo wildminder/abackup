@@ -24,6 +24,8 @@ def test_readme_mentions_commands():
         "max_workers",
         "Settings",
         "compression level",
+        "7-Zip",
+        "Prefer 7-Zip",
         "Documents",
         "home",
         "--show-settings",

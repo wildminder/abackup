@@ -68,6 +68,7 @@ def main(argv=None) -> None:
             config_dir=args.config_dir,
             data_dir=args.data_dir,
             max_workers=max_workers,
+            prefer_7z=settings.prefer_7z,
         )
         _print_batch_summary(results)
         return

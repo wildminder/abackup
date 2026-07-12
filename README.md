@@ -10,8 +10,10 @@ Use **Add job** to create a job; the add-job form interactively asks for:
 1. **Source folder** — the local folder to back up.
 2. **Destination folder** — where backups are written.
 3. **Method** — how to back up:
-   - **Direct copy** — mirrors the source tree into the destination.
-   - **Zip archive** — creates `<source_name>_<YYYY-MM-DD>.zip` in the destination.
+    - **Direct copy** — mirrors the source tree into the destination.
+    - **Zip archive** — creates `<source_name>_<YYYY-MM-DD>.zip` in the destination.
+      When [7-Zip](https://www.7-zip.org/) is installed, ABackup prefers it and
+      produces a smaller `<source_name>_<YYYY-MM-DD>.7z` (LZMA2) archive instead.
 
 Jobs and settings are stored as JSON under a config directory in your home folder
 (`Documents\abackup` on Windows, `~/abackup` elsewhere) and survive restarts.
@@ -96,8 +98,12 @@ Open the **Settings** screen from the main menu to tune global options:
 
 - **Storage location** — the config directory. Changing it moves all existing data
   (jobs, settings, logs) to the new location atomically.
-- **Zip compression level** — `0` (store, no compression) to `9` (max). Default `6`.
-  Applies to the `zip` backup method.
+  - **Zip compression level** — `0` (store, no compression) to `9` (max). Default `6`.
+    Applies to the `zip` backup method.
+  - **Prefer 7-Zip** — when enabled (default) and a 7-Zip binary is detected on the
+    system, the `zip` method uses 7-Zip to produce a `.7z` (LZMA2) archive, which
+    compresses better than the standard `.zip`. Disable it to always use the
+    built-in `zipfile` writer (no external dependency).
 - **Max workers** — default number of concurrent jobs for *Run all jobs*.
 - **Default destination** — pre-filled destination for new jobs.
 - **Log level** — `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
@@ -140,5 +146,7 @@ pytest --cov=src/abackup --cov-fail-under=90
 - `abackup/tui/*` — Textual screens (add-job wizard, main menu, run-job).
 - `abackup/cli.py` — entry point and flags.
 
-Determinism: timestamps are injectable, IDs use `uuid5` (not random), and zip
-output is byte-reproducible.
+Determinism: timestamps are injectable, IDs use `uuid5` (not random), and the
+built-in `zip` output is byte-reproducible. Note that 7-Zip (`.7z`) archives are
+*not* byte-reproducible — if you need deterministic output, disable **Prefer
+7-Zip** in Settings (or set `prefer_7z = false`).

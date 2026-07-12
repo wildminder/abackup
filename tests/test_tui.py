@@ -371,6 +371,7 @@ async def test_run_job_screen_shows_realtime_progress(tmp_config, tmp_data, monk
         clock=None,
         zip_compression_level=6,
         cancel=None,
+        prefer_7z=None,
     ):
         # Scripted realtime sequence: 0% (no file yet) -> 100% (mid.txt).
         on_progress(
@@ -446,6 +447,7 @@ async def test_run_all_screen_shows_realtime_progress(tmp_config, tmp_data, monk
         clock=None,
         zip_compression_level=None,
         cancel=None,
+        prefer_7z=None,
     ):
         for j in jobs:
             on_progress(

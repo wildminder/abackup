@@ -6,7 +6,7 @@ from pathlib import Path
 
 from textual.containers import Vertical, Horizontal, ScrollableContainer
 from textual.screen import Screen
-from textual.widgets import Input, Select, Static, Button, Header, Footer, Label
+from textual.widgets import Input, Select, Static, Button, Header, Footer, Label, Checkbox
 
 from abackup.config import load_settings, save_settings, relocate_storage
 from abackup.models import Settings
@@ -87,6 +87,15 @@ class SettingsScreen(Screen):
                 Static("Used as the destination when creating a new job.", classes="field-hint"),
                 classes="field",
             ),
+            Vertical(
+                Checkbox("Prefer 7-Zip when installed (better compression)", id="prefer_7z"),
+                Static(
+                    "Uses 7z for the 'zip' method when available; falls back to "
+                    "Python's zipfile. Disable for byte-reproducible archives.",
+                    classes="field-hint",
+                ),
+                classes="field",
+            ),
             Static("", id="error"),
             id="body",
         )
@@ -104,6 +113,7 @@ class SettingsScreen(Screen):
         self.query_one("#workers", Input).value = str(self._existing.max_workers)
         self.query_one("#log_level", Select).value = self._existing.log_level
         self.query_one("#default_dest", Input).value = self._existing.default_destination or ""
+        self.query_one("#prefer_7z", Checkbox).value = self._existing.prefer_7z
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
@@ -120,6 +130,7 @@ class SettingsScreen(Screen):
             workers = int(self.query_one("#workers", Input).value)
             log_level = self.query_one("#log_level", Select).value
             default_dest = self.query_one("#default_dest", Input).value.strip() or None
+            prefer_7z = self.query_one("#prefer_7z", Checkbox).value
         except ValueError as exc:
             error.update(f"Invalid number: {exc}")
             return
@@ -130,6 +141,7 @@ class SettingsScreen(Screen):
             log_level=log_level,
             max_workers=workers,
             zip_compression_level=zip_level,
+            prefer_7z=prefer_7z,
             created_at=self._existing.created_at,
         )
         try:

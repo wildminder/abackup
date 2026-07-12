@@ -86,11 +86,13 @@ class RunAllScreen(Screen):
             self.app.call_from_thread(self._update_job, job_id, p)
 
         def run_batch() -> None:
+            settings = load_settings(self.config_dir)
             results = run_jobs_batch(
                 jobs,
                 config_dir=self.config_dir,
                 data_dir=self.data_dir,
-                max_workers=load_settings(self.config_dir).max_workers,
+                max_workers=settings.max_workers,
+                prefer_7z=settings.prefer_7z,
                 on_job_done=on_job_done,
                 on_progress=on_progress,
                 cancel=self._cancel,

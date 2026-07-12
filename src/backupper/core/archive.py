@@ -8,28 +8,13 @@ import zipfile
 from datetime import date
 from pathlib import Path
 
-from abackup.core.paths import safe_archive_name, set_hidden
+from abackup.core.paths import safe_archive_name
 from abackup.core.progress import (
     Progress,
     PHASE_ZIPPING,
     OptionalProgressCallback,
 )
 from abackup.utils.errors import SourceNotFound, DestinationError, JobCancelled
-
-from typing import Callable, Optional
-
-# Staging directory lives OUTSIDE the destination (in the system temp
-# dir) so a half-written / cancelled file never sits in the folder
-# the OS shell is displaying. The finished archive is then moved into
-# the destination atomically via os.replace, and marked hidden so
-# Explorer's Compressed Folders handler (zipfldr.dll) does not
-# preview / index a large .zip and peg a CPU core.
-_STAGE_PREFIX = "abackup_zip_"
-
-
-def _log(log, level: str, record: dict) -> None:
-    if log is not None:
-        log(level, record)
 
 # Fixed timestamp so zip byte output is reproducible across runs.
 ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
@@ -48,7 +33,6 @@ def make_zip(
     cancel=None,
     job_id: str = "",
     on_progress: OptionalProgressCallback = None,
-    log: Optional[Callable[[str, dict], None]] = None,
 ) -> Path:
     """Create ``<source_name>_<YYYY-MM-DD>.zip`` in ``destination``.
 
@@ -63,15 +47,6 @@ def make_zip(
     If ``cancel`` (a ``threading.Event``) is set, raises ``JobCancelled`` before
     the next file (and mid-file for the in-progress entry) so a batch can be
     aborted promptly.
-
-    The archive is staged in the **system temp directory (outside the
-    destination)** and only moved into place (atomically, via ``os.replace``)
-    once it is complete. This keeps a partial / cancelled file out of the
-    folder the OS shell is displaying, so Explorer's Compressed Folders handler
-    never tries to preview a broken archive. The finished archive is then
-    marked **hidden** so Explorer's default view does not preview / index a
-    (possibly large) ``.zip`` and peg a CPU core. ``log`` (optional) receives
-    diagnostic records (tmp/final paths and their existence) for troubleshooting.
     """
     src = Path(source)
     dst = Path(destination)
@@ -84,12 +59,7 @@ def make_zip(
 
     name = safe_archive_name(src.name or "backup", when)
     final = dst / name
-    # Stage OUTSIDE the destination (system temp) so a partial /
-    # cancelled file never sits in the folder the OS shell is
-    # displaying. Only the finished archive is moved into place.
-    stage = Path(tempfile.mkdtemp(prefix=_STAGE_PREFIX, dir=tempfile.gettempdir()))
-    fd, tmp = tempfile.mkstemp(dir=str(stage), suffix=".tmp")
-    _log(log, "debug", {"event": "zip_start", "tmp": tmp, "final": str(final)})
+    fd, tmp = tempfile.mkstemp(dir=str(dst), suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as out, zipfile.ZipFile(
             out, "w", zipfile.ZIP_DEFLATED, compresslevel=compress_level
@@ -116,7 +86,6 @@ def make_zip(
 
             for f in files:
                 if cancel is not None and cancel.is_set():
-                    _log(log, "debug", {"event": "zip_cancel_before_file", "file": str(f)})
                     raise JobCancelled("Zip cancelled")
                 arcname = f.relative_to(src).as_posix()
                 info = zipfile.ZipInfo(arcname, date_time=ZIP_EPOCH)
@@ -132,7 +101,6 @@ def make_zip(
                 with open(f, "rb") as inp:
                     while True:
                         if cancel is not None and cancel.is_set():
-                            _log(log, "debug", {"event": "zip_cancel_mid_file", "file": arcname})
                             raise JobCancelled("Zip cancelled")
                         chunk = inp.read(CHUNK)
                         if not chunk:
@@ -167,37 +135,8 @@ def make_zip(
                         )
                     )
         os.replace(tmp, final)
-        # Hide the final archive so Explorer's default view does not
-        # preview / index a (possibly large) .zip and peg a CPU core.
-        set_hidden(final)
-        _log(
-            log,
-            "debug",
-            {
-                "event": "zip_done",
-                "final": str(final),
-                "tmp_exists": os.path.exists(tmp),
-                "final_exists": os.path.exists(final),
-            },
-        )
     except BaseException:
         if os.path.exists(tmp):
             os.remove(tmp)
-        _log(
-            log,
-            "debug",
-            {
-                "event": "zip_cleanup",
-                "tmp_removed": not os.path.exists(tmp),
-                "final_exists": os.path.exists(final),
-            },
-        )
         raise
-    finally:
-        # Remove the (now empty) staging dir if we created it.
-        try:
-            if stage.is_dir() and not any(stage.iterdir()):
-                stage.rmdir()
-        except OSError:
-            pass
     return final

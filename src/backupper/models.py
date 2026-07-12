@@ -38,6 +38,7 @@ class Settings:
     log_level: str = "INFO"
     max_workers: int = 4
     zip_compression_level: int = 6
+    prefer_7z: bool = True
     created_at: str = field(default_factory=lambda: _now().isoformat())
 
     def to_dict(self) -> dict[str, Any]:

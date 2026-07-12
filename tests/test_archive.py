@@ -1,8 +1,4 @@
-import ctypes
-import sys
 import threading
-
-import pytest
 from datetime import date
 from pathlib import Path
 from zipfile import ZipFile
@@ -178,58 +174,3 @@ def test_make_zip_cancel_stops_progress(sample_tree, dest_dir, monkeypatch):
         raise AssertionError("expected JobCancelled")
     assert seen
     assert seen[-1].bytes_done < seen[-1].bytes_total
-
-
-def test_make_zip_cancel_leaves_no_staging_or_zip(sample_tree, dest_dir):
-    # Regression: a cancelled zip must not leave a partial archive (or a
-    # staging dir) in the watched destination, which would make Explorer's
-    # Compressed Folders handler (zipfldr.dll) spin on it.
-    records = []
-    cancel = threading.Event()
-    cancel.set()
-    try:
-        make_zip(
-            sample_tree,
-            dest_dir,
-            when=date(2026, 7, 12),
-            cancel=cancel,
-            log=lambda lvl, rec: records.append(rec),
-        )
-    except JobCancelled:
-        pass
-    else:
-        raise AssertionError("expected JobCancelled")
-
-    assert not list(dest_dir.glob("*.zip"))
-    assert not (dest_dir / ".abackup_tmp").exists()
-    cleanup = [r for r in records if r.get("event") == "zip_cleanup"]
-    assert cleanup, "expected a zip_cleanup diagnostic record"
-    assert cleanup[-1]["tmp_removed"] is True
-    assert cleanup[-1]["final_exists"] is False
-
-
-def test_make_zip_success_moves_final_and_cleans_stage(sample_tree, dest_dir):
-    records = []
-    out = make_zip(
-        sample_tree,
-        dest_dir,
-        when=date(2026, 7, 12),
-        log=lambda lvl, rec: records.append(rec),
-    )
-    assert out.exists()
-    # Final archive is in the destination root, staging dir cleaned up.
-    assert not (dest_dir / ".abackup_tmp").exists()
-    done = [r for r in records if r.get("event") == "zip_done"]
-    assert done, "expected a zip_done diagnostic record"
-    assert done[-1]["final_exists"] is True
-    assert done[-1]["tmp_exists"] is False
-
-
-def test_make_zip_final_is_hidden_on_windows(sample_tree, dest_dir):
-    out = make_zip(sample_tree, dest_dir, when=date(2026, 7, 12))
-    # The staging dir must not live inside the watched destination.
-    assert not (dest_dir / ".abackup_tmp").exists()
-    if sys.platform != "win32":
-        pytest.skip("windows-only")
-    attrs = ctypes.windll.kernel32.GetFileAttributesW(str(out))
-    assert attrs & 0x2  # FILE_ATTRIBUTE_HIDDEN

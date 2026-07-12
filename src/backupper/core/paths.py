@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ctypes
 import re
 import sys
 from datetime import date
@@ -48,14 +47,14 @@ def ensure_dir(path: str | Path) -> Path:
     return p
 
 
-def safe_archive_name(source_name: str, when: date | None = None) -> str:
-    """Deterministic archive name: ``<source>_<YYYY-MM-DD>.zip``.
+def safe_archive_name(source_name: str, when: date | None = None, ext: str = ".zip") -> str:
+    """Deterministic archive name: ``<source>_<YYYY-MM-DD><ext>``.
 
     Unsafe characters are replaced with underscores; falls back to ``backup``.
     """
     when = when or date.today()
     base = _UNSAFE.sub("_", source_name).strip("_") or "backup"
-    return f"{base}_{when.isoformat()}.zip"
+    return f"{base}_{when.isoformat()}{ext}"
 
 
 def settings_file_path(config_dir: str | Path) -> Path:
@@ -102,25 +101,3 @@ def shorten_path(
         return name[: max_len - 1] + "…"
     keep = max_len - len(name) - 1  # room for "…" + basename
     return f"{text[:keep]}…{name}"
-
-
-def set_hidden(path: str | Path) -> None:
-    """Mark ``path`` as hidden (Windows only). No-op elsewhere.
-
-    Hiding the final archive from Explorer's default view stops the
-    shell's Compressed Folders handler (``zipfldr.dll``) from
-    previewing / indexing a large ``.zip`` and pegging a CPU core
-    while it enumerates the archive. The file stays fully accessible;
-    this only affects default (non-hidden) Explorer display. Best-effort:
-    failures are swallowed so a backup never breaks over an attribute.
-    """
-    if sys.platform != "win32":
-        return
-    try:
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-        FILE_ATTRIBUTE_HIDDEN = 0x2
-        if not kernel32.SetFileAttributesW(str(path), FILE_ATTRIBUTE_HIDDEN):
-            return
-    except Exception:
-        # Never break a backup over a file attribute.
-        pass

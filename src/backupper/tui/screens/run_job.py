@@ -6,7 +6,7 @@ from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import ProgressBar, Static, Button
 
-from abackup.config import load_jobs, save_jobs
+from abackup.config import load_jobs, save_jobs, load_settings
 from abackup.core.backup import run_job
 from abackup.core.paths import shorten_path
 from abackup.core.progress import Progress
@@ -50,6 +50,7 @@ class RunJobScreen(Screen):
             self.job,
             config_dir=self.config_dir,
             data_dir=self.data_dir,
+            prefer_7z=load_settings(self.config_dir).prefer_7z,
             on_progress=on_progress,
         )
         self.query_one("#progress", ProgressBar).update(progress=100)

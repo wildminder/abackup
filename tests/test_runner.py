@@ -132,6 +132,7 @@ def test_run_jobs_batch_passes_level_from_settings(
         clock=None,
         zip_compression_level=6,
         cancel=None,
+        prefer_7z=None,
     ):
         captured.append(zip_compression_level)
         return real_run_job(
@@ -171,6 +172,7 @@ def test_run_jobs_batch_explicit_level_overrides_settings(
         clock=None,
         zip_compression_level=6,
         cancel=None,
+        prefer_7z=None,
     ):
         captured.append(zip_compression_level)
         return real_run_job(

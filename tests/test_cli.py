@@ -58,7 +58,7 @@ def test_cli_workers_flag(tmp_config, tmp_data, sample_tree, tmp_path, monkeypat
 
     captured = {}
 
-    def fake_run(jobs, *, config_dir=None, data_dir=None, max_workers=4, on_job_done=None, clock=None):
+    def fake_run(jobs, *, config_dir=None, data_dir=None, max_workers=4, on_job_done=None, clock=None, prefer_7z=None):
         captured["max_workers"] = max_workers
         return []
 

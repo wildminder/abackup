@@ -1,7 +1,3 @@
-import ctypes
-import sys
-
-import pytest
 from datetime import date
 from pathlib import Path
 
@@ -14,7 +10,6 @@ from abackup.core.paths import (
     jobs_file_path,
     default_config_dir,
     shorten_path,
-    set_hidden,
 )
 
 
@@ -57,6 +52,11 @@ def test_safe_archive_name_sanitizes():
 def test_safe_archive_name_fallback_empty():
     name = safe_archive_name("", date(2026, 1, 1))
     assert name == "backup_2026-01-01.zip"
+
+
+def test_safe_archive_name_custom_ext():
+    name = safe_archive_name("My Docs", date(2026, 1, 1), ext=".7z")
+    assert name == "My_Docs_2026-01-01.7z"
 
 
 def test_file_paths(tmp_path):
@@ -106,21 +106,3 @@ def test_shorten_path_basename_too_long_gets_elided():
 def test_shorten_path_short_unchanged():
     # Short path under root is returned unchanged (relative form).
     assert shorten_path("C:/root/sub/file.txt", "C:/root", max_len=40) == "sub/file.txt"
-
-
-def test_set_hidden_is_safe(tmp_path):
-    # Best-effort: must never raise, on any platform.
-    p = tmp_path / "f.txt"
-    p.write_text("x", encoding="utf-8")
-    set_hidden(p)
-    assert p.exists()
-
-
-def test_set_hidden_sets_attribute_on_windows(tmp_path):
-    if sys.platform != "win32":
-        pytest.skip("windows-only")
-    p = tmp_path / "f.txt"
-    p.write_text("x", encoding="utf-8")
-    set_hidden(p)
-    attrs = ctypes.windll.kernel32.GetFileAttributesW(str(p))
-    assert attrs & 0x2  # FILE_ATTRIBUTE_HIDDEN
