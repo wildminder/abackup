@@ -52,7 +52,7 @@ def test_run_job_uses_compression_level(sample_tree, dest_dir, tmp_config, tmp_d
 
     captured = {}
 
-    def fake_make_zip(source, destination, *, when=None, compress_level=6, cancel=None, job_id="", on_progress=None):
+    def fake_make_zip(source, destination, *, when=None, compress_level=6, cancel=None, job_id="", on_progress=None, log=None):
         captured["compress_level"] = compress_level
         return Path(destination) / "x.zip"
 

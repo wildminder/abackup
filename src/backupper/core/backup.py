@@ -102,6 +102,7 @@ def run_job(
                 cancel=cancel,
                 job_id=job.id,
                 on_progress=_forward,
+                log=logger.log,
             )
             summary: dict = {"archive": str(out)}
         else:
