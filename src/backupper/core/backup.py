@@ -12,7 +12,7 @@ from abackup.core.archive import make_zip
 from abackup.core.copy import copy_tree
 from abackup.core.paths import get_data_dir, ensure_dir
 from abackup.models import BackupJob, BackupMethod
-from abackup.utils.errors import SourceNotFound, DestinationError
+from abackup.utils.errors import SourceNotFound, DestinationError, JobCancelled
 from abackup.utils.logging import RunLogger
 
 ProgressFn = Callable[[int, int, str], None]
@@ -41,12 +41,16 @@ def run_job(
     on_progress: Optional[ProgressFn] = None,
     clock=None,
     zip_compression_level: int = 6,
+    cancel=None,
 ) -> BackupResult:
     """Run a single backup job.
 
     Writes a run manifest + log under the data dir, and returns an updated
     ``BackupJob`` (with ``last_run_at``/``last_status``) for the caller to
     persist. Does NOT mutate the jobs config itself.
+
+    If ``cancel`` (a ``threading.Event``) is set mid-run, the underlying copy/zip
+    raises ``JobCancelled`` and this returns a result with ``status="cancelled"``.
     """
     clock = clock or _now
     data_dir = get_data_dir(data_dir)
@@ -57,12 +61,24 @@ def run_job(
     try:
         if job.method == BackupMethod.ZIP:
             out = make_zip(
-                job.source, job.destination, compress_level=zip_compression_level
+                job.source,
+                job.destination,
+                compress_level=zip_compression_level,
+                cancel=cancel,
             )
             summary: dict = {"archive": str(out)}
         else:
-            summary = copy_tree(job.source, job.destination, on_progress=on_progress)
+            summary = copy_tree(
+                job.source, job.destination, on_progress=on_progress, cancel=cancel
+            )
         status = "success"
+    except JobCancelled:
+        updated = BackupJob(
+            **{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "cancelled"}
+        )
+        return BackupResult(
+            job.id, job.method.value, "cancelled", {}, None, "cancelled", updated
+        )
     except (SourceNotFound, DestinationError) as exc:
         logger.log("error", {"job_id": job.id, "error": str(exc)})
         updated = BackupJob(

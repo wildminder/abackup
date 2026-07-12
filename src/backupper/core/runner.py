@@ -16,6 +16,14 @@ from abackup.models import BackupJob
 ProgressFn = Callable[[str, BackupResult], None]
 
 
+def _cancelled_result(job: "BackupJob", clock) -> BackupResult:
+    """Build a 'cancelled' result (with an updated job) for a job that did not run."""
+    updated = BackupJob(
+        **{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "cancelled"}
+    )
+    return BackupResult(job.id, job.method.value, "cancelled", {}, None, "cancelled", updated)
+
+
 def run_jobs_batch(
     jobs: List[BackupJob],
     *,
@@ -25,6 +33,7 @@ def run_jobs_batch(
     on_job_done: Optional[ProgressFn] = None,
     clock=None,
     zip_compression_level: int | None = None,
+    cancel: Optional[threading.Event] = None,
 ) -> List[BackupResult]:
     """Run every job concurrently using a bounded worker-thread pool + queue.
 
@@ -32,6 +41,10 @@ def run_jobs_batch(
     threads (at least one). Each worker persists its own ``updated_job`` under a
     lock (so ``jobs.json`` is never corrupted) and invokes ``on_job_done``.
     Results are returned in the original input order for determinism.
+
+    If ``cancel`` (a ``threading.Event``) is set, queued-but-not-started jobs are
+    marked ``cancelled`` and in-flight jobs abort at the next cancellation check
+    inside the copy/zip routines.
     """
     if not jobs:
         return []
@@ -55,6 +68,14 @@ def run_jobs_batch(
                 job = q.get_nowait()
             except queue.Empty:
                 return
+            # A job that hasn't started yet should not run once cancellation
+            # has been requested.
+            if cancel is not None and cancel.is_set():
+                results[job.id] = _cancelled_result(job, clock)
+                if on_job_done is not None:
+                    on_job_done(job.id, results[job.id])
+                q.task_done()
+                continue
             try:
                 result = run_job(
                     job,
@@ -62,6 +83,7 @@ def run_jobs_batch(
                     data_dir=data_dir,
                     clock=clock,
                     zip_compression_level=zip_compression_level,
+                    cancel=cancel,
                 )
                 if result.updated_job is not None:
                     with lock:

@@ -21,3 +21,7 @@ class DestinationError(ABackupError):
 
 class JobNotFound(ABackupError):
     """Requested job id does not exist."""
+
+
+class JobCancelled(ABackupError):
+    """Raised when a backup job is aborted via a cancellation signal."""

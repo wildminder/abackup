@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 
 from abackup.core.paths import safe_archive_name
-from abackup.utils.errors import SourceNotFound, DestinationError
+from abackup.utils.errors import SourceNotFound, DestinationError, JobCancelled
 
 # Fixed timestamp so zip byte output is reproducible across runs.
 ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
@@ -21,11 +21,15 @@ def make_zip(
     *,
     when: date | None = None,
     compress_level: int = 6,
+    cancel=None,
 ) -> Path:
     """Create ``<source_name>_<YYYY-MM-DD>.zip`` in ``destination``.
 
     Files are streamed in sorted order with a fixed entry timestamp, making the
     resulting archive byte-for-byte reproducible for the same inputs.
+
+    If ``cancel`` (a ``threading.Event``) is set, raises ``JobCancelled`` before
+    the next file so a batch can be aborted promptly.
     """
     src = Path(source)
     dst = Path(destination)
@@ -47,6 +51,8 @@ def make_zip(
                 (p for p in src.rglob("*") if p.is_file()), key=lambda p: p.as_posix()
             )
             for f in files:
+                if cancel is not None and cancel.is_set():
+                    raise JobCancelled("Zip cancelled")
                 arcname = f.relative_to(src).as_posix()
                 info = zipfile.ZipInfo(arcname, date_time=ZIP_EPOCH)
                 info.compress_type = zipfile.ZIP_DEFLATED

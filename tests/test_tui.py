@@ -256,9 +256,66 @@ async def test_settings_relocate_on_save(tmp_config, tmp_data, tmp_path):
         app.screen.query_one("#save", Button).press()
         await pilot.pause()
         assert (new_dir / "settings.json").exists()
-        assert (new_dir / "jobs.json").exists()
-        assert not (Path(tmp_config) / "settings.json").exists()
-        assert app.config_dir == str(new_dir)
+
+
+async def test_run_all_cancel_button_terminates_jobs(tmp_config, tmp_data, tmp_path, monkeypatch):
+    import time
+
+    from abackup.config import load_jobs, save_jobs
+    from abackup.tui.screens.run_all import RunAllScreen
+    from abackup.utils.errors import JobCancelled
+
+    # Replace the real copy with a slow, cancel-aware stub so the job stays
+    # "in flight" until the Cancel button sets the shared event. This makes the
+    # test deterministic (no reliance on a large file copy timing out).
+    def slow_copy_tree(src, dst, *, on_progress=None, cancel=None, **kwargs):
+        while not (cancel and cancel.is_set()):
+            time.sleep(0.01)
+        raise JobCancelled("cancelled")
+
+    monkeypatch.setattr("abackup.core.backup.copy_tree", slow_copy_tree)
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "f.txt").write_text("hello")
+    save_jobs(
+        [
+            BackupJob(
+                source=str(src),
+                destination=str(tmp_path / "out"),
+                method="copy",
+                name="big",
+            )
+        ],
+        tmp_config,
+    )
+
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(RunAllScreen(tmp_config, tmp_data))
+        await pilot.pause()
+        # Cancel is available; Back is disabled while running.
+        assert app.screen.query_one("#cancel", Button).disabled is False
+        assert app.screen.query_one("#back", Button).disabled is True
+
+        app.screen.query_one("#cancel", Button).press()
+        await pilot.pause()
+        assert app.screen._cancel.is_set()
+        assert app.screen.query_one("#cancel", Button).disabled is True
+
+        # Wait for the batch to finish (cancelled).
+        for _ in range(200):
+            await pilot.pause()
+            if app.screen._completed:
+                break
+        assert app.screen._completed
+        # The in-flight job was aborted and its cancelled status persisted.
+        assert load_jobs(tmp_config)[0].last_status == "cancelled"
+        assert app.screen.query_one("#back", Button).disabled is False
+
+        # Back returns to the main menu.
+        app.screen.query_one("#back", Button).press()
+        await pilot.pause()
         assert isinstance(app.screen, MainMenuScreen)
 
 

@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
-from abackup.utils.errors import SourceNotFound, DestinationError
+from abackup.utils.errors import SourceNotFound, DestinationError, JobCancelled
 
 # Signature: on_progress(done, total, current_relative_path)
 ProgressFn = Callable[[int, int, str], None]
@@ -20,12 +20,22 @@ def _iter_files(source: Path):
             yield Path(root) / name
 
 
-def _atomic_copy_file(src: Path, target: Path) -> None:
-    """Copy ``src`` to ``target`` atomically (temp file + rename), preserving mtime."""
+def _atomic_copy_file(src: Path, target: Path, cancel=None) -> None:
+    """Copy ``src`` to ``target`` atomically (temp file + rename), preserving mtime.
+
+    Copies in 1 MiB chunks and checks ``cancel`` (a ``threading.Event``) between
+    chunks, raising ``JobCancelled`` if it is set so a long copy is interruptible.
+    """
     fd, tmp = tempfile.mkstemp(dir=str(target.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as out, open(src, "rb") as inp:
-            shutil.copyfileobj(inp, out)
+            while True:
+                if cancel is not None and cancel.is_set():
+                    raise JobCancelled("Copy cancelled")
+                chunk = inp.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
             out.flush()
             os.fsync(out.fileno())
         os.replace(tmp, target)
@@ -43,12 +53,19 @@ def copy_tree(
     *,
     on_progress: Optional[ProgressFn] = None,
     overwrite: bool = True,
+    cancel=None,
 ) -> dict:
     """Mirror ``source`` into ``destination``.
 
     Returns a summary dict. Each file is written to a temp file then atomically
     renamed into place, so a crash never leaves a half-written final file.
+
+    If ``cancel`` (a ``threading.Event``) is set, raises ``JobCancelled`` before
+    the next file (and mid-file for the in-progress copy) so a batch can be
+    aborted promptly.
     """
+    if cancel is not None and cancel.is_set():
+        raise JobCancelled("Copy cancelled")
     src = Path(source)
     dst = Path(destination)
     if not src.exists() or not src.is_dir():
@@ -65,6 +82,8 @@ def copy_tree(
     bytes_copied = 0
 
     for f in files:
+        if cancel is not None and cancel.is_set():
+            raise JobCancelled("Copy cancelled")
         rel = f.relative_to(src)
         target = dst / rel
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -78,11 +97,11 @@ def copy_tree(
                 if s_stat.st_size == t_stat.st_size and s_stat.st_mtime == t_stat.st_mtime:
                     skipped += 1
                 else:
-                    _atomic_copy_file(f, target)
+                    _atomic_copy_file(f, target, cancel=cancel)
                     copied += 1
                     bytes_copied += s_stat.st_size
         else:
-            _atomic_copy_file(f, target)
+            _atomic_copy_file(f, target, cancel=cancel)
             copied += 1
             bytes_copied += f.stat().st_size
         if on_progress is not None:

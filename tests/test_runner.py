@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 from abackup.config import load_jobs
@@ -130,6 +131,7 @@ def test_run_jobs_batch_passes_level_from_settings(
         on_progress=None,
         clock=None,
         zip_compression_level=6,
+        cancel=None,
     ):
         captured.append(zip_compression_level)
         return real_run_job(
@@ -139,6 +141,7 @@ def test_run_jobs_batch_passes_level_from_settings(
             on_progress=on_progress,
             clock=clock,
             zip_compression_level=zip_compression_level,
+            cancel=cancel,
         )
 
     monkeypatch.setattr(runner_mod, "run_job", spy)
@@ -167,6 +170,7 @@ def test_run_jobs_batch_explicit_level_overrides_settings(
         on_progress=None,
         clock=None,
         zip_compression_level=6,
+        cancel=None,
     ):
         captured.append(zip_compression_level)
         return real_run_job(
@@ -176,6 +180,7 @@ def test_run_jobs_batch_explicit_level_overrides_settings(
             on_progress=on_progress,
             clock=clock,
             zip_compression_level=zip_compression_level,
+            cancel=cancel,
         )
 
     monkeypatch.setattr(runner_mod, "run_job", spy)
@@ -188,3 +193,46 @@ def test_run_jobs_batch_explicit_level_overrides_settings(
         zip_compression_level=7,
     )
     assert captured == [7]
+
+
+def test_cancel_already_set_marks_all_cancelled(sample_tree, tmp_path, tmp_config, tmp_data):
+    jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(3)]
+    cancel = threading.Event()
+    cancel.set()
+    results = run_jobs_batch(
+        jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=2, cancel=cancel
+    )
+    assert len(results) == 3
+    assert all(r.status == "cancelled" for r in results)
+    # Cancelled jobs must not have written any output.
+    assert not (tmp_path / "d0").exists()
+
+
+def test_cancel_after_first_job_cancels_the_rest(
+    sample_tree, tmp_path, tmp_config, tmp_data
+):
+    jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(3)]
+    cancel = threading.Event()
+    seen = []
+
+    def on_job_done(job_id, result):
+        seen.append(job_id)
+        # Once the first job finishes, request cancellation of the remaining ones.
+        if len(seen) >= 1:
+            cancel.set()
+
+    results = run_jobs_batch(
+        jobs,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        max_workers=1,
+        on_job_done=on_job_done,
+        cancel=cancel,
+    )
+    by_id = {r.job_id: r for r in results}
+    # The first job ran to completion; the others were cancelled before starting.
+    assert by_id[jobs[0].id].status == "success"
+    assert by_id[jobs[1].id].status == "cancelled"
+    assert by_id[jobs[2].id].status == "cancelled"
+    assert (tmp_path / "d0").exists()
+    assert not (tmp_path / "d1").exists()

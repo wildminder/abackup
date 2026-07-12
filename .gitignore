@@ -41,6 +41,10 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Debug / scratch logs produced during development
+step*.txt
+docs/errors.txt
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

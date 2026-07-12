@@ -29,6 +29,7 @@ def test_readme_mentions_commands():
         "home",
         "--show-settings",
         "zip_compression_level",
+        "Cancel",
     ]:
         assert token in text
 

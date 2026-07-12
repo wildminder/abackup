@@ -64,6 +64,12 @@ large number of jobs is processed with bounded memory. The worker count is
 controlled by the `max_workers` setting (default `4`) or the `--workers` flag. A
 failing job never stops the others, and each job's status is persisted.
 
+While a batch runs you can press **Cancel** to abort *all* jobs. The request is
+signalled through a shared event that the copy/zip routines check between (and,
+for copies, during) files, so in-flight jobs stop promptly and any queued jobs
+are marked `cancelled` without running. The summary reports how many jobs
+succeeded, failed, and were cancelled.
+
 ### Settings
 
 Open the **Settings** screen from the main menu to tune global options:
