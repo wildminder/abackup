@@ -39,6 +39,7 @@ class Settings:
     log_level: str = "INFO"
     max_workers: int = 4
     zip_compression_level: int = 6
+    seven_zip_compression_level: int = 3
     prefer_py7zr: bool = True
     created_at: str = field(default_factory=lambda: _now().isoformat())
 
@@ -59,6 +60,8 @@ class Settings:
         """Raise ``ConfigError`` if any field is out of its valid range."""
         if not (0 <= self.zip_compression_level <= 9):
             raise ConfigError("zip_compression_level must be between 0 and 9")
+        if not (0 <= self.seven_zip_compression_level <= 9):
+            raise ConfigError("seven_zip_compression_level must be between 0 and 9")
         if self.max_workers < 1:
             raise ConfigError("max_workers must be >= 1")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:

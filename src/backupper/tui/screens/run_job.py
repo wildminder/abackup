@@ -51,6 +51,9 @@ class RunJobScreen(Screen):
             config_dir=self.config_dir,
             data_dir=self.data_dir,
             prefer_py7zr=load_settings(self.config_dir).prefer_py7zr,
+            seven_zip_compression_level=load_settings(
+                self.config_dir
+            ).seven_zip_compression_level,
             on_progress=on_progress,
         )
         self.query_one("#progress", ProgressBar).update(progress=100)

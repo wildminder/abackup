@@ -93,6 +93,7 @@ class RunAllScreen(Screen):
                 data_dir=self.data_dir,
                 max_workers=settings.max_workers,
                 prefer_py7zr=settings.prefer_py7zr,
+                seven_zip_compression_level=settings.seven_zip_compression_level,
                 on_job_done=on_job_done,
                 on_progress=on_progress,
                 cancel=self._cancel,

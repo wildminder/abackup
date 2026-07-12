@@ -83,6 +83,37 @@ def test_settings_from_dict_defaults_level():
     assert s.zip_compression_level == 6
 
 
+def test_seven_zip_level_default_3():
+    assert Settings().seven_zip_compression_level == 3
+
+
+def test_seven_zip_level_round_trip():
+    s = Settings(seven_zip_compression_level=9)
+    assert Settings.from_dict(s.to_dict()).seven_zip_compression_level == 9
+
+
+def test_settings_from_dict_defaults_seven_zip_level():
+    # Old settings.json (no seven_zip_compression_level) loads with default 3.
+    s = Settings.from_dict({})
+    assert s.seven_zip_compression_level == 3
+
+
+def test_settings_validate_rejects_seven_zip_level_10():
+    try:
+        Settings(seven_zip_compression_level=10).validate()
+    except ConfigError:
+        return
+    raise AssertionError("expected ConfigError")
+
+
+def test_settings_validate_rejects_seven_zip_level_neg():
+    try:
+        Settings(seven_zip_compression_level=-1).validate()
+    except ConfigError:
+        return
+    raise AssertionError("expected ConfigError")
+
+
 def test_settings_validate_rejects_level_10():
     try:
         Settings(zip_compression_level=10).validate()

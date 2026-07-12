@@ -104,6 +104,10 @@ Open the **Settings** screen from the main menu to tune global options:
   (jobs, settings, logs) to the new location atomically.
   - **Zip compression level** — `0` (store, no compression) to `9` (max). Default `6`.
     Applies to the `zip` backup method.
+  - **7z compression level** — `0` (copy, no compression) to `9` (ultra). Default `3`
+    (fast). Sets the LZMA2 `preset` for the **7z** backup method: `0` = copy,
+    `1` = fastest, `3` = fast, `5` = normal, `7` = maximum, `9` = ultra. This is
+    independent of the Zip level above.
   - **Prefer py7zr** — controls the engine used for **7z** jobs. Enabled by
     default, 7z jobs use the pure-Python **py7zr** library (no external
     dependency). Disable it to prefer the (usually faster) system
@@ -117,7 +121,7 @@ You can also inspect the resolved config directory and current settings non-inte
 
 ```bash
 python -m abackup --show-settings
-# => {"config_dir": "...", "zip_compression_level": 6, "max_workers": 4, ...}
+# => {"config_dir": "...", "zip_compression_level": 6, "seven_zip_compression_level": 3, "max_workers": 4, ...}
 ```
 
 ## Storage

@@ -71,6 +71,16 @@ class SettingsScreen(Screen):
                 classes="field",
             ),
             Vertical(
+                Label("7z compression level (0-9)", classes="field-label"),
+                Input(id="sz_level", placeholder="0 = copy, 3 = fast, 5 = normal, 9 = ultra, default 3"),
+                Static(
+                    "LZMA2 preset for the '7z' method. 0 stores (no compression), "
+                    "3 is fast, 9 is ultra (slowest). Default 3.",
+                    classes="field-hint",
+                ),
+                classes="field",
+            ),
+            Vertical(
                 Label("Max concurrent workers", classes="field-label"),
                 Input(id="workers", placeholder="default 4"),
                 Static("How many jobs run at once with 'Run all jobs'.", classes="field-hint"),
@@ -115,6 +125,7 @@ class SettingsScreen(Screen):
         self._existing = load_settings(self.config_dir)
         self.query_one("#config_dir", Input).value = str(self.config_dir)
         self.query_one("#zip_level", Input).value = str(self._existing.zip_compression_level)
+        self.query_one("#sz_level", Input).value = str(self._existing.seven_zip_compression_level)
         self.query_one("#workers", Input).value = str(self._existing.max_workers)
         self.query_one("#log_level", Select).value = self._existing.log_level
         self.query_one("#default_dest", Input).value = self._existing.default_destination or ""
@@ -132,6 +143,7 @@ class SettingsScreen(Screen):
         try:
             config_dir = self.query_one("#config_dir", Input).value.strip()
             zip_level = int(self.query_one("#zip_level", Input).value)
+            sz_level = int(self.query_one("#sz_level", Input).value)
             workers = int(self.query_one("#workers", Input).value)
             log_level = self.query_one("#log_level", Select).value
             default_dest = self.query_one("#default_dest", Input).value.strip() or None
@@ -146,6 +158,7 @@ class SettingsScreen(Screen):
             log_level=log_level,
             max_workers=workers,
             zip_compression_level=zip_level,
+            seven_zip_compression_level=sz_level,
             prefer_py7zr=prefer_py7zr,
             created_at=self._existing.created_at,
         )

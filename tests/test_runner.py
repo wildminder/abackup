@@ -131,6 +131,7 @@ def test_run_jobs_batch_passes_level_from_settings(
         on_progress=None,
         clock=None,
         zip_compression_level=6,
+        seven_zip_compression_level=3,
         cancel=None,
         prefer_py7zr=None,
     ):
@@ -142,6 +143,7 @@ def test_run_jobs_batch_passes_level_from_settings(
             on_progress=on_progress,
             clock=clock,
             zip_compression_level=zip_compression_level,
+            seven_zip_compression_level=seven_zip_compression_level,
             cancel=cancel,
         )
 
@@ -171,6 +173,7 @@ def test_run_jobs_batch_explicit_level_overrides_settings(
         on_progress=None,
         clock=None,
         zip_compression_level=6,
+        seven_zip_compression_level=3,
         cancel=None,
         prefer_py7zr=None,
     ):
@@ -182,6 +185,7 @@ def test_run_jobs_batch_explicit_level_overrides_settings(
             on_progress=on_progress,
             clock=clock,
             zip_compression_level=zip_compression_level,
+            seven_zip_compression_level=seven_zip_compression_level,
             cancel=cancel,
         )
 
@@ -195,6 +199,96 @@ def test_run_jobs_batch_explicit_level_overrides_settings(
         zip_compression_level=7,
     )
     assert captured == [7]
+
+
+def test_run_jobs_batch_passes_seven_zip_level_from_settings(
+    sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch
+):
+    from abackup.config import save_settings
+    from abackup.models import Settings
+
+    import abackup.core.runner as runner_mod
+
+    save_settings(Settings(seven_zip_compression_level=4), tmp_config)
+    captured = []
+    real_run_job = runner_mod.run_job
+
+    def spy(
+        job,
+        *,
+        config_dir=None,
+        data_dir=None,
+        on_progress=None,
+        clock=None,
+        zip_compression_level=6,
+        seven_zip_compression_level=3,
+        cancel=None,
+        prefer_py7zr=None,
+    ):
+        captured.append(seven_zip_compression_level)
+        return real_run_job(
+            job,
+            config_dir=config_dir,
+            data_dir=data_dir,
+            on_progress=on_progress,
+            clock=clock,
+            zip_compression_level=zip_compression_level,
+            seven_zip_compression_level=seven_zip_compression_level,
+            cancel=cancel,
+        )
+
+    monkeypatch.setattr(runner_mod, "run_job", spy)
+    jobs = [_make_job(0, sample_tree, tmp_path / "d0")]
+    run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=1)
+    assert captured == [4]
+
+
+def test_run_jobs_batch_explicit_seven_zip_level_overrides_settings(
+    sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch
+):
+    from abackup.config import save_settings
+    from abackup.models import Settings
+
+    import abackup.core.runner as runner_mod
+
+    save_settings(Settings(seven_zip_compression_level=4), tmp_config)
+    captured = []
+    real_run_job = runner_mod.run_job
+
+    def spy(
+        job,
+        *,
+        config_dir=None,
+        data_dir=None,
+        on_progress=None,
+        clock=None,
+        zip_compression_level=6,
+        seven_zip_compression_level=3,
+        cancel=None,
+        prefer_py7zr=None,
+    ):
+        captured.append(seven_zip_compression_level)
+        return real_run_job(
+            job,
+            config_dir=config_dir,
+            data_dir=data_dir,
+            on_progress=on_progress,
+            clock=clock,
+            zip_compression_level=zip_compression_level,
+            seven_zip_compression_level=seven_zip_compression_level,
+            cancel=cancel,
+        )
+
+    monkeypatch.setattr(runner_mod, "run_job", spy)
+    jobs = [_make_job(0, sample_tree, tmp_path / "d0")]
+    run_jobs_batch(
+        jobs,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        max_workers=1,
+        seven_zip_compression_level=8,
+    )
+    assert captured == [8]
 
 
 def test_cancel_already_set_marks_all_cancelled(sample_tree, tmp_path, tmp_config, tmp_data):

@@ -37,6 +37,7 @@ def run_jobs_batch(
     on_progress: Optional[JobProgressFn] = None,
     clock=None,
     zip_compression_level: int | None = None,
+    seven_zip_compression_level: int | None = None,
     prefer_py7zr: bool | None = None,
     cancel: Optional[threading.Event] = None,
 ) -> List[BackupResult]:
@@ -60,6 +61,8 @@ def run_jobs_batch(
         zip_compression_level = load_settings(config_dir).zip_compression_level
     if prefer_py7zr is None:
         prefer_py7zr = load_settings(config_dir).prefer_py7zr
+    if seven_zip_compression_level is None:
+        seven_zip_compression_level = load_settings(config_dir).seven_zip_compression_level
 
     order = [j.id for j in jobs]
     results: dict[str, BackupResult] = {}
@@ -99,6 +102,7 @@ def run_jobs_batch(
                     data_dir=data_dir,
                     clock=clock,
                     zip_compression_level=zip_compression_level,
+                    seven_zip_compression_level=seven_zip_compression_level,
                     prefer_py7zr=prefer_py7zr,
                     cancel=cancel,
                     on_progress=(

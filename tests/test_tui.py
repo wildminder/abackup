@@ -287,6 +287,34 @@ async def test_settings_change_compression_level(tmp_config, tmp_data):
         assert isinstance(app.screen, MainMenuScreen)
 
 
+async def test_settings_change_seven_zip_level(tmp_config, tmp_data):
+    save_settings(Settings(), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        app.push_screen(SettingsScreen(tmp_config, tmp_data))
+        await pilot.pause()
+        app.screen.query_one("#sz_level", Input).value = "7"
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+        assert load_settings(tmp_config).seven_zip_compression_level == 7
+        assert isinstance(app.screen, MainMenuScreen)
+
+
+async def test_settings_seven_zip_level_validation_error_stays(tmp_config, tmp_data):
+    save_settings(Settings(seven_zip_compression_level=3), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(tmp_config, tmp_data))
+        await pilot.pause()
+        app.screen.query_one("#sz_level", Input).value = "42"
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+        # Invalid value -> stays on settings, file unchanged.
+        assert isinstance(app.screen, SettingsScreen)
+        assert load_settings(tmp_config).seven_zip_compression_level == 3
+
+
 async def test_settings_validation_error_stays(tmp_config, tmp_data):
     save_settings(Settings(zip_compression_level=6), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
@@ -392,6 +420,7 @@ async def test_run_job_screen_shows_realtime_progress(tmp_config, tmp_data, monk
         on_progress=None,
         clock=None,
         zip_compression_level=6,
+        seven_zip_compression_level=3,
         cancel=None,
         prefer_py7zr=None,
     ):
@@ -468,6 +497,7 @@ async def test_run_all_screen_shows_realtime_progress(tmp_config, tmp_data, monk
         on_progress=None,
         clock=None,
         zip_compression_level=None,
+        seven_zip_compression_level=None,
         cancel=None,
         prefer_py7zr=None,
     ):

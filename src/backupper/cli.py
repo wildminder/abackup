@@ -69,6 +69,7 @@ def main(argv=None) -> None:
             data_dir=args.data_dir,
             max_workers=max_workers,
             prefer_py7zr=settings.prefer_py7zr,
+            seven_zip_compression_level=settings.seven_zip_compression_level,
         )
         _print_batch_summary(results)
         return

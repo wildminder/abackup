@@ -50,6 +50,7 @@ def run_job(
     on_progress: Optional[ProgressFn] = None,
     clock=None,
     zip_compression_level: int = 6,
+    seven_zip_compression_level: int = 3,
     prefer_py7zr: bool = True,
     cancel=None,
 ) -> BackupResult:
@@ -109,7 +110,7 @@ def run_job(
             out = make_archive(
                 job.source,
                 job.destination,
-                compress_level=zip_compression_level,
+                compress_level=seven_zip_compression_level,
                 prefer_7z=True,
                 prefer_py7zr=prefer_py7zr,
                 cancel=cancel,

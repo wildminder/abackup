@@ -58,13 +58,36 @@ def test_cli_workers_flag(tmp_config, tmp_data, sample_tree, tmp_path, monkeypat
 
     captured = {}
 
-    def fake_run(jobs, *, config_dir=None, data_dir=None, max_workers=4, on_job_done=None, clock=None, prefer_py7zr=None):
+    def fake_run(jobs, *, config_dir=None, data_dir=None, max_workers=4, on_job_done=None, clock=None, prefer_py7zr=None, seven_zip_compression_level=None):
         captured["max_workers"] = max_workers
         return []
 
     monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
     main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data, "--workers", "2"])
     assert captured["max_workers"] == 2
+
+
+def test_cli_run_all_passes_seven_zip_level(tmp_config, tmp_data, sample_tree, tmp_path, monkeypatch):
+    jobs = [
+        BackupJob(
+            source=str(sample_tree),
+            destination=str(tmp_path / "out"),
+            method="copy",
+            name="job",
+        )
+    ]
+    save_jobs(jobs, tmp_config)
+    save_settings(Settings(seven_zip_compression_level=5), tmp_config)
+
+    captured = {}
+
+    def fake_run(jobs, *, config_dir=None, data_dir=None, max_workers=4, on_job_done=None, clock=None, prefer_py7zr=None, seven_zip_compression_level=None):
+        captured["seven_zip_compression_level"] = seven_zip_compression_level
+        return []
+
+    monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
+    main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert captured["seven_zip_compression_level"] == 5
 
 
 def test_cli_show_settings(tmp_config, tmp_data, capsys):

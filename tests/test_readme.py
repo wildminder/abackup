@@ -30,6 +30,7 @@ def test_readme_mentions_commands():
         "home",
         "--show-settings",
         "zip_compression_level",
+        "seven_zip_compression_level",
         "Cancel",
         "Realtime progress",
         "Byte-level",

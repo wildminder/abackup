@@ -71,3 +71,66 @@ the system binary is usually faster.
 ## Atomicity / safety
 No change to storage format beyond the `Settings` key rename (handled by
 `from_dict` mapping). Job `method` values are explicit strings persisted as-is.
+
+---
+
+# Addendum: separate 7z compression level (LZMA2 preset)
+
+## Problem
+The previous design shared a single `zip_compression_level` (0–9, default 6) for
+both the `zip` and `7z` methods. 7z at level 6/9 is slow, and users could not tune
+the 7z LZMA2 `preset` independently of the zip level.
+
+## Decision
+Add a **separate** `seven_zip_compression_level` (0–9, default **3 = fast**) to
+`Settings`, independent of `zip_compression_level`. The value is passed straight
+through to the 7z engine as the LZMA2 `preset` (py7zr) or `-mx` flag (system 7z).
+
+### `Settings` (models.py)
+- `seven_zip_compression_level: int = 3` (NEW).
+- `validate()` rejects values outside `0..9` (mirrors `zip_compression_level`).
+- `from_dict` keeps the default `3` when the key is absent (backward compatible).
+
+### `compression.make_archive` (core/compression.py)
+Unchanged: already forwards `compress_level` to both `make_7z_py7zr`
+(`filters=[{"id": py7zr.FILTER_LZMA2, "preset": compress_level}]`) and `make_7z`
+(`-mx{compress_level}`).
+
+### `backup.run_job` (core/backup.py)
+- New param `seven_zip_compression_level: int = 3`.
+- `ZIP` branch → `make_zip(compress_level=zip_compression_level, ...)`.
+- `SEVEN_ZIP` branch → `make_archive(compress_level=seven_zip_compression_level, ...)`.
+- The two levels are fully independent (verified by `test_run_job_zip_level_independent_from_seven_zip_level`).
+
+### `runner.run_jobs_batch` (core/runner.py)
+- New param `seven_zip_compression_level: int | None = None`; defaults to
+  `load_settings(config_dir).seven_zip_compression_level`; passed to `run_job`.
+
+### CLI / TUI threading
+- `cli.py --run-all`: `seven_zip_compression_level=settings.seven_zip_compression_level`.
+- `tui/screens/run_job.py`: `seven_zip_compression_level=load_settings(...).seven_zip_compression_level`.
+- `tui/screens/run_all.py`: `seven_zip_compression_level=settings.seven_zip_compression_level`.
+
+### Settings screen (tui/screens/settings.py)
+- New `Input(id="sz_level")` with hint describing the LZMA2 preset scale
+  (`0` copy … `3` fast … `9` ultra, default 3). Parsed as int, validated by
+  `Settings.validate()`, persisted via `Settings(...)`.
+
+## Tests
+- `test_models.py`: default `3`, round-trip, `from_dict` default, `validate` rejects `10`/`-1`.
+- `test_backup.py`: `test_run_job_uses_seven_zip_compression_level` (spy on
+  `make_archive` captures `compress_level`); `test_run_job_zip_level_independent_from_seven_zip_level`.
+- `test_runner.py`: `test_run_jobs_batch_passes_seven_zip_level_from_settings` and
+  `test_run_jobs_batch_explicit_seven_zip_level_overrides_settings` (spy on `run_job`).
+- `test_cli.py`: `test_cli_run_all_passes_seven_zip_level` (spy on `run_jobs_batch`).
+- `test_tui.py`: `test_settings_change_seven_zip_level` + validation-error test;
+  updated `run_job`/`run_jobs_batch` mock signatures to accept `seven_zip_compression_level`.
+- `test_readme.py`: README must mention `seven_zip_compression_level`.
+
+## Docs
+- `README.md`: Settings lists "7z compression level" (0 copy … 9 ultra, default 3)
+  and notes it is independent of the Zip level; `--show-settings` example includes it.
+
+## Atomicity / safety
+No storage-format change; `seven_zip_compression_level` is a new optional key with
+a safe default, so existing `settings.json` files load unchanged.

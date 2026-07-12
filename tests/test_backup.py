@@ -79,6 +79,92 @@ def test_run_job_uses_compression_level(sample_tree, dest_dir, tmp_config, tmp_d
     assert captured["compress_level"] == 3
 
 
+def test_run_job_uses_seven_zip_compression_level(sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch):
+    import abackup.core.backup as backup_mod
+    from pathlib import Path
+
+    captured = {}
+
+    def fake_make_archive(
+        source,
+        destination,
+        *,
+        when=None,
+        compress_level=6,
+        cancel=None,
+        job_id="",
+        on_progress=None,
+        prefer_7z=True,
+        prefer_py7zr=True,
+    ):
+        captured["compress_level"] = compress_level
+        return Path(destination) / "x.7z"
+
+    monkeypatch.setattr(backup_mod, "make_archive", fake_make_archive)
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="7z")
+    run_job(
+        job,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        clock=_clock,
+        seven_zip_compression_level=4,
+    )
+    assert captured["compress_level"] == 4
+
+
+def test_run_job_zip_level_independent_from_seven_zip_level(
+    sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch
+):
+    import abackup.core.backup as backup_mod
+    from pathlib import Path
+
+    captured = {}
+
+    def fake_make_zip(source, destination, *, when=None, compress_level=6, cancel=None, job_id="", on_progress=None):
+        captured.setdefault("zip", compress_level)
+        return Path(destination) / "x.zip"
+
+    def fake_make_archive(
+        source,
+        destination,
+        *,
+        when=None,
+        compress_level=6,
+        cancel=None,
+        job_id="",
+        on_progress=None,
+        prefer_7z=True,
+        prefer_py7zr=True,
+    ):
+        captured.setdefault("seven", compress_level)
+        return Path(destination) / "x.7z"
+
+    monkeypatch.setattr(backup_mod, "make_zip", fake_make_zip)
+    monkeypatch.setattr(backup_mod, "make_archive", fake_make_archive)
+
+    zip_job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="zip")
+    run_job(
+        zip_job,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        clock=_clock,
+        zip_compression_level=9,
+        seven_zip_compression_level=2,
+    )
+    seven_job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="7z")
+    run_job(
+        seven_job,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        clock=_clock,
+        zip_compression_level=9,
+        seven_zip_compression_level=2,
+    )
+    # Each method uses its own level, independent of the other.
+    assert captured["zip"] == 9
+    assert captured["seven"] == 2
+
+
 def test_run_job_cancel_copy_mid_run(sample_tree, dest_dir, tmp_config, tmp_data):
     cancel = threading.Event()
     seen = []
