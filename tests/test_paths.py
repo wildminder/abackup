@@ -178,7 +178,7 @@ def test_shorten_display_path_posix_absolute():
 
 
 def test_shorten_display_path_relative():
-    long = "Users/art/Documents/Projects/abackup/deep/file.txt"
+    long = "Users/user/Documents/Projects/abackup/deep/file.txt"
     out = shorten_display_path(long, max_len=50)
     assert out.startswith("Users")
     assert out.endswith("…/file.txt")
