@@ -248,15 +248,6 @@ def test_make_archive_falls_back_to_zip_when_no_7z(monkeypatch, sample_tree, des
     assert out.suffix == ".zip"
     assert out.exists()
 
-
-def test_make_archive_forces_zip_when_prefer_7z_false(monkeypatch, sample_tree, dest_dir):
-    monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
-    out = make_archive(
-        sample_tree, dest_dir, when=date(2026, 7, 12), prefer_7z=False
-    )
-    assert out.suffix == ".zip"
-
-
 def test_make_7z_py7zr_produces_valid_archive(sample_tree, dest_dir):
     out = make_7z_py7zr(sample_tree, dest_dir, when=date(2026, 7, 12), compress_level=6)
     assert out.suffix == ".7z"
@@ -389,3 +380,81 @@ def test_make_7z_emits_realtime_progress(monkeypatch, sample_tree, dest_dir):
     assert inter
     # Multiple distinct intermediate values -> smooth movement, not a jump.
     assert len({p.bytes_done for p in inter}) > 1
+
+
+def test_make_7z_py7zr_no_overwrite_same_day(sample_tree, dest_dir):
+    # A second same-day run must not clobber the first 7z archive (NTH-006).
+    first = make_7z_py7zr(sample_tree, dest_dir, when=date(2026, 7, 12), compress_level=6)
+    second = make_7z_py7zr(sample_tree, dest_dir, when=date(2026, 7, 12), compress_level=6)
+    assert first.name == "source_2026-07-12.7z"
+    assert second.name == "source_2026-07-12_1.7z"
+    assert first.exists() and second.exists()
+
+
+def test_make_7z_no_overwrite_same_day(monkeypatch, sample_tree, dest_dir):
+    monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
+
+    class FakeProc:
+        def __init__(self, cmd, **kw):
+            self.returncode = 0
+            self._tmp = Path(cmd[5])
+            self._tmp.write_bytes(b"archive")
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(compression.subprocess, "Popen", FakeProc)
+    first = make_7z(sample_tree, dest_dir, when=date(2026, 7, 12))
+    second = make_7z(sample_tree, dest_dir, when=date(2026, 7, 12))
+    assert first.name == "source_2026-07-12.7z"
+    assert second.name == "source_2026-07-12_1.7z"
+    assert first.exists() and second.exists()
+
+
+def test_make_7z_passes_mmt_when_threads_given(monkeypatch, sample_tree, dest_dir):
+    # NTH-005: when a thread cap is supplied, 7z must get -mmt<N>.
+    monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
+    captured = {}
+
+    class FakeProc:
+        def __init__(self, cmd, **kw):
+            captured["cmd"] = cmd
+            self.returncode = 0
+            self._tmp = Path(cmd[-2])  # tmp is the second-to-last arg (before ".")
+            self._tmp.write_bytes(b"archive")
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(compression.subprocess, "Popen", FakeProc)
+    make_7z(sample_tree, dest_dir, when=date(2026, 7, 12), threads=2)
+    assert "-mmt2" in captured["cmd"]
+
+
+def test_make_7z_no_mmt_when_threads_none(monkeypatch, sample_tree, dest_dir):
+    # Single-job runs keep threads=None -> 7z uses all cores (no -mmt flag).
+    monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
+    captured = {}
+
+    class FakeProc:
+        def __init__(self, cmd, **kw):
+            captured["cmd"] = cmd
+            self.returncode = 0
+            self._tmp = Path(cmd[5])
+            self._tmp.write_bytes(b"archive")
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(compression.subprocess, "Popen", FakeProc)
+    make_7z(sample_tree, dest_dir, when=date(2026, 7, 12))
+    assert not any(c.startswith("-mmt") for c in captured["cmd"])

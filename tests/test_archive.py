@@ -1,6 +1,5 @@
 import threading
 from datetime import date
-from pathlib import Path
 from zipfile import ZipFile
 
 from abackup.core.archive import make_zip
@@ -14,6 +13,18 @@ def test_make_zip_name_and_contents(sample_tree, dest_dir):
         names = sorted(zf.namelist())
     assert "a/f1.txt" in names
     assert "b.txt" in names
+
+
+def test_make_zip_no_overwrite_same_day(sample_tree, dest_dir):
+    # A second run the same day must not clobber the first archive (NTH-006).
+    first = make_zip(sample_tree, dest_dir, when=date(2026, 7, 12))
+    second = make_zip(sample_tree, dest_dir, when=date(2026, 7, 12))
+    assert first.name == "source_2026-07-12.zip"
+    assert second.name == "source_2026-07-12_1.zip"
+    assert first.exists() and second.exists()
+    # Both archives are valid and independent.
+    assert ZipFile(first).namelist()
+    assert ZipFile(second).namelist()
 
 
 def test_make_zip_deterministic(sample_tree, dest_dir):

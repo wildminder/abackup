@@ -1,31 +1,36 @@
 """Archive engine selection for the backup orchestrator.
 
-``make_archive`` is the single entry point used by the backup orchestrator. When
-7z output is preferred (``prefer_7z``), it uses the following precedence:
+``make_archive`` is the single entry point used by the backup orchestrator.
+Engine precedence (produces a 7z archive unless no 7z engine exists, then a
+deterministic ``.zip``):
 
-1. **System 7-Zip binary** — primary. Multithreaded LZMA2, so it uses all
-   CPU cores and is dramatically faster than the pure-Python path (typically
-   5-10x). Used whenever a ``7z``/``7za`` binary is found on PATH or in
-   common install locations.
-2. **py7zr** (pure-Python library) — fallback when no binary is available.
-   Single-threaded and non-solid (per-file streams), so it is much
-   slower than the multithreaded binary for large trees.
-3. **stdlib ``zipfile``** — last resort (deterministic ``.zip``), used when 7z is
-   disabled or no 7z engine is available.
+1. **py7zr** (pure-Python library) — used first when ``prefer_py7zr=True``
+   (the default) and the library is importable. Single-threaded and non-solid
+   (per-file streams), so it is slower than the multithreaded binary for large
+   trees.
+2. **System 7-Zip binary** — used when ``prefer_py7zr=False`` or py7zr is
+   unavailable but a ``7z``/``7za`` binary is found on PATH or in common
+   install locations. Multithreaded LZMA2, so it uses all CPU cores and is
+   dramatically faster than the pure-Python path (typically 5-10x).
+3. **py7zr** again — fallback when the binary is absent but py7zr is present.
+4. **stdlib ``zipfile``** — last resort (deterministic ``.zip``), used when no
+   7z engine is available at all.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
-import subprocess
+import subprocess  # noqa: B404 - used to invoke the 7-Zip binary (list args, no shell).
 import tempfile
+import threading
 import time
 from datetime import date
 from pathlib import Path
 
 from abackup.core.archive import make_zip
-from abackup.core.paths import safe_archive_name
+from abackup.core.paths import unique_archive_name
 from abackup.core.progress import (
     Progress,
     PHASE_ZIPPING,
@@ -44,6 +49,8 @@ try:  # Windows-only registry access; absent on other platforms.
     import winreg
 except ImportError:  # pragma: no cover - non-Windows
     winreg = None  # type: ignore[assignment]
+
+logger = logging.getLogger(__name__)
 
 # Candidate 7-Zip executables, in preference order. ``7z.exe`` is the full
 # command-line binary; ``7za``/``7zr`` are the standalone/reduced console
@@ -86,11 +93,14 @@ def _seven_zip_registry_paths() -> list[str]:
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\7-Zip"),
     ]
     for hive, subkey in roots:
+        value = None
         try:
             with winreg.OpenKey(hive, subkey) as key:
                 value, _ = winreg.QueryValueEx(key, "Path")
-        except OSError:
-            continue
+        except OSError as exc:
+            logger.warning(
+                "7-Zip registry key absent %s\\%s: %s", hive, subkey, exc
+            )
         if value:
             found.append(str(value))
     # De-duplicate while preserving order.
@@ -149,32 +159,20 @@ def make_archive(
     *,
     when: date | None = None,
     compress_level: int = 6,
-    cancel=None,
+    cancel: threading.Event | None = None,
     job_id: str = "",
     on_progress: OptionalProgressCallback = None,
-    prefer_7z: bool = True,
     prefer_py7zr: bool = False,
+    threads: int | None = None,
 ) -> Path:
     """Create an archive of ``source`` in ``destination``.
 
-    When ``prefer_7z`` is ``False`` (the user explicitly chose the ``.zip``
-    method), always uses the deterministic stdlib ``.zip`` writer. When the user
-    wants 7z (``prefer_7z=True``), the engine is chosen by ``prefer_py7zr``:
+    Produces a 7z archive. The engine is chosen by ``prefer_py7zr``:
 
     * ``prefer_py7zr=True`` (default) -> py7zr library (primary).
     * otherwise -> system 7-Zip binary when present, else py7zr as a fallback.
     * if no 7z engine is available at all -> stdlib ``.zip`` (safety net).
     """
-    if not prefer_7z:
-        return make_zip(
-            source,
-            destination,
-            when=when,
-            compress_level=compress_level,
-            cancel=cancel,
-            job_id=job_id,
-            on_progress=on_progress,
-        )
     if prefer_py7zr and _have_py7zr():
         return make_7z_py7zr(
             source,
@@ -194,6 +192,7 @@ def make_archive(
             cancel=cancel,
             job_id=job_id,
             on_progress=on_progress,
+            threads=threads,
         )
     if _have_py7zr():
         return make_7z_py7zr(
@@ -222,7 +221,7 @@ def make_7z_py7zr(
     *,
     when: date | None = None,
     compress_level: int = 6,
-    cancel=None,
+    cancel: threading.Event | None = None,
     job_id: str = "",
     on_progress: OptionalProgressCallback = None,
 ) -> Path:
@@ -248,7 +247,7 @@ def make_7z_py7zr(
     except OSError as exc:
         raise DestinationError(f"Cannot create destination {dst}: {exc}") from exc
 
-    name = safe_archive_name(src.name or "backup", when, ext=".7z")
+    name = unique_archive_name(src.name or "backup", when, ext=".7z", dest_dir=dst)
     final = dst / name
     fd, tmp = tempfile.mkstemp(dir=str(dst), suffix=".tmp")
     os.close(fd)
@@ -319,15 +318,72 @@ def make_7z_py7zr(
     return final
 
 
+def _poll_7z_progress(
+    proc: "subprocess.Popen[bytes]",
+    tmp: str,
+    total: int,
+    bytes_total: int,
+    on_progress: OptionalProgressCallback,
+    job_id: str,
+    cancel: threading.Event | None,
+    timeout: float | None,
+) -> None:
+    """Poll the 7z temp archive size and forward progress; honour cancel/timeout.
+
+    Raises ``JobCancelled`` if the caller's cancel event is set, or
+    ``DestinationError`` if ``timeout`` (seconds) elapses before 7z exits, so a
+    wedged process cannot block the run forever.
+    """
+    start = time.monotonic()
+    last_pct = -1
+    while proc.poll() is None:
+        if cancel is not None and cancel.is_set():
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            raise JobCancelled("7z cancelled")
+        if timeout is not None and (time.monotonic() - start) > timeout:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            raise DestinationError(
+                f"7z timed out after {timeout:g}s (job {job_id or '?'})"
+            )
+        cur = os.path.getsize(tmp) if os.path.exists(tmp) else 0
+        est = max(bytes_total // 2, cur) if bytes_total else max(1, cur)
+        pct = min(99, int(cur / est * 100)) if est else 0
+        if pct != last_pct and on_progress is not None:
+            last_pct = pct
+            bytes_done = int(bytes_total * pct / 100) if bytes_total else cur
+            files_done = min(total, int(round(total * pct / 100))) if total else 0
+            on_progress(
+                Progress(
+                    job_id=job_id,
+                    files_total=total,
+                    files_done=files_done,
+                    bytes_total=bytes_total,
+                    bytes_done=bytes_done,
+                    phase=PHASE_ZIPPING,
+                )
+            )
+        time.sleep(0.05)
+
+
 def make_7z(
     source: str | Path,
     destination: str | Path,
     *,
     when: date | None = None,
     compress_level: int = 6,
-    cancel=None,
+    cancel: threading.Event | None = None,
     job_id: str = "",
     on_progress: OptionalProgressCallback = None,
+    threads: int | None = None,
+    timeout: float | None = None,
 ) -> Path:
     """Create ``<source_name>_<YYYY-MM-DD>.7z`` in ``destination`` via 7-Zip.
 
@@ -342,7 +398,8 @@ def make_7z(
     against an adaptive estimate of the final compressed size (seeded at 50% of
     the source bytes, grown if exceeded). This works on every platform with no
     extra dependencies and gives a smoothly moving bar. ``cancel`` terminates
-    the subprocess.
+    the subprocess; ``timeout`` (seconds) terminates it if exceeded, raising
+    ``DestinationError`` so a wedged 7z cannot block the run forever.
     """
     src = Path(source)
     dst = Path(destination)
@@ -353,17 +410,14 @@ def make_7z(
     except OSError as exc:
         raise DestinationError(f"Cannot create destination {dst}: {exc}") from exc
 
-    name = safe_archive_name(src.name or "backup", when, ext=".7z")
+    name = unique_archive_name(src.name or "backup", when, ext=".7z", dest_dir=dst)
     final = dst / name
     fd, tmp = tempfile.mkstemp(dir=str(dst), suffix=".tmp")
     os.close(fd)
     # 7z's "add" mode refuses to *create* an archive over a pre-existing
     # file (it would try to append to it and fail), so discard the empty
     # placeholder that mkstemp just created; 7z will create it fresh.
-    try:
-        os.remove(tmp)
-    except FileNotFoundError:
-        pass
+    Path(tmp).unlink(missing_ok=True)
     try:
         files = sorted(
             (p for p in src.rglob("*") if p.is_file()), key=lambda p: p.as_posix()
@@ -393,41 +447,23 @@ def make_7z(
         # *size* (which grows monotonically as 7z compresses) and derive a
         # percentage against an adaptive estimate of the final compressed
         # size (seeded at 50% of the source bytes; grown if exceeded).
-        cmd = [exe, "a", "-y", "-t7z", f"-mx{compress_level}", tmp, "."]
-        proc = subprocess.Popen(
+        cmd = [exe, "a", "-y", "-t7z", f"-mx{compress_level}"]
+        # Cap threads so concurrent 7z jobs (run via the batch runner with
+        # max_workers>1) don't oversubscribe the CPU (NTH-005). When threads is
+        # None we let 7z use all cores (single-job runs stay fast).
+        if threads is not None:
+            cmd.append(f"-mmt{threads}")
+        cmd += [tmp, "."]
+        proc = subprocess.Popen(  # noqa: B603 - safe: list form (no shell); exe is a validated path, args are fixed.
             cmd,
             cwd=str(src),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
 
-        last_pct = -1
-        while proc.poll() is None:
-            if cancel is not None and cancel.is_set():
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                raise JobCancelled("7z cancelled")
-            cur = os.path.getsize(tmp) if os.path.exists(tmp) else 0
-            est = max(bytes_total // 2, cur) if bytes_total else max(1, cur)
-            pct = min(99, int(cur / est * 100)) if est else 0
-            if pct != last_pct and on_progress is not None:
-                last_pct = pct
-                bytes_done = int(bytes_total * pct / 100) if bytes_total else cur
-                files_done = min(total, int(round(total * pct / 100))) if total else 0
-                on_progress(
-                    Progress(
-                        job_id=job_id,
-                        files_total=total,
-                        files_done=files_done,
-                        bytes_total=bytes_total,
-                        bytes_done=bytes_done,
-                        phase=PHASE_ZIPPING,
-                    )
-                )
-            time.sleep(0.05)
+        _poll_7z_progress(
+            proc, tmp, total, bytes_total, on_progress, job_id, cancel, timeout
+        )
 
         if proc.returncode != 0:
             raise DestinationError(f"7z failed with exit code {proc.returncode}")

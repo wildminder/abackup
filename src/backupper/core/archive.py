@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 import zipfile
 from datetime import date
 from pathlib import Path
 
-from abackup.core.paths import safe_archive_name
+from abackup.core.constants import CHUNK
+from abackup.core.paths import unique_archive_name
 from abackup.core.progress import (
     Progress,
     PHASE_ZIPPING,
@@ -19,9 +21,19 @@ from abackup.utils.errors import SourceNotFound, DestinationError, JobCancelled
 # Fixed timestamp so zip byte output is reproducible across runs.
 ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
 
-# Stream files in 1 MiB chunks so we can report byte-level progress without
-# loading an entire (possibly huge) file into memory.
-CHUNK = 1024 * 1024
+# Read each file in 1 MiB chunks so we can emit byte-level progress, but buffer
+# the whole member in memory before writestr so the exact compresslevel is applied
+# reproducibly (zf.open's streaming path does not reliably honour per-member
+# compresslevel across CPython versions). A single large file therefore resides in
+# memory during compression.
+
+
+def _emit_zip_progress(
+    on_progress: OptionalProgressCallback, progress: Progress
+) -> None:
+    """Emit a ``Progress`` snapshot for the zip writer (no-op when unset)."""
+    if on_progress is not None:
+        on_progress(progress)
 
 
 def make_zip(
@@ -30,7 +42,7 @@ def make_zip(
     *,
     when: date | None = None,
     compress_level: int = 6,
-    cancel=None,
+    cancel: threading.Event | None = None,
     job_id: str = "",
     on_progress: OptionalProgressCallback = None,
 ) -> Path:
@@ -41,8 +53,9 @@ def make_zip(
 
     Emits :class:`Progress` snapshots via ``on_progress``: one at start (totals
     from a pre-scan), one per 1 MiB chunk (byte-level), and one per file
-    (file-level). Each file is written through ``ZipFile.open(..., "w")`` in
-    chunks so progress is smooth and memory stays bounded.
+    (file-level). Each file is buffered and written via ``ZipFile.writestr`` with
+    an explicit ``compresslevel`` so the archive is byte-for-byte reproducible;
+    progress is emitted per 1 MiB chunk as the file is read.
 
     If ``cancel`` (a ``threading.Event``) is set, raises ``JobCancelled`` before
     the next file (and mid-file for the in-progress entry) so a batch can be
@@ -57,7 +70,7 @@ def make_zip(
     except OSError as exc:
         raise DestinationError(f"Cannot create destination {dst}: {exc}") from exc
 
-    name = safe_archive_name(src.name or "backup", when)
+    name = unique_archive_name(src.name or "backup", when, dest_dir=dst)
     final = dst / name
     fd, tmp = tempfile.mkstemp(dir=str(dst), suffix=".tmp")
     try:
@@ -72,17 +85,17 @@ def make_zip(
             files_done = 0
             bytes_done_total = 0
 
-            if on_progress is not None:
-                on_progress(
-                    Progress(
-                        job_id=job_id,
-                        files_total=total,
-                        files_done=0,
-                        bytes_total=bytes_total,
-                        bytes_done=0,
-                        phase=PHASE_ZIPPING,
-                    )
-                )
+            _emit_zip_progress(
+                on_progress,
+                Progress(
+                    job_id=job_id,
+                    files_total=total,
+                    files_done=0,
+                    bytes_total=bytes_total,
+                    bytes_done=0,
+                    phase=PHASE_ZIPPING,
+                ),
+            )
 
             for f in files:
                 if cancel is not None and cancel.is_set():
@@ -107,33 +120,33 @@ def make_zip(
                             break
                         data.extend(chunk)
                         done += len(chunk)
-                        if on_progress is not None:
-                            on_progress(
-                                Progress(
-                                    job_id=job_id,
-                                    files_total=total,
-                                    files_done=files_done,
-                                    bytes_total=bytes_total,
-                                    bytes_done=bytes_done_total + done,
-                                    current_file=arcname,
-                                    phase=PHASE_ZIPPING,
-                                )
-                            )
+                        _emit_zip_progress(
+                            on_progress,
+                            Progress(
+                                job_id=job_id,
+                                files_total=total,
+                                files_done=files_done,
+                                bytes_total=bytes_total,
+                                bytes_done=bytes_done_total + done,
+                                current_file=arcname,
+                                phase=PHASE_ZIPPING,
+                            ),
+                        )
                 zf.writestr(info, bytes(data), compresslevel=compress_level)
                 bytes_done_total += size
                 files_done += 1
-                if on_progress is not None:
-                    on_progress(
-                        Progress(
-                            job_id=job_id,
-                            files_total=total,
-                            files_done=files_done,
-                            bytes_total=bytes_total,
-                            bytes_done=bytes_done_total,
-                            current_file=arcname,
-                            phase=PHASE_ZIPPING,
-                        )
-                    )
+                _emit_zip_progress(
+                    on_progress,
+                    Progress(
+                        job_id=job_id,
+                        files_total=total,
+                        files_done=files_done,
+                        bytes_total=bytes_total,
+                        bytes_done=bytes_done_total,
+                        current_file=arcname,
+                        phase=PHASE_ZIPPING,
+                    ),
+                )
         os.replace(tmp, final)
     except BaseException:
         if os.path.exists(tmp):

@@ -134,6 +134,7 @@ def test_run_jobs_batch_passes_level_from_settings(
         seven_zip_compression_level=3,
         cancel=None,
         prefer_py7zr=None,
+        threads=None,
     ):
         captured.append(zip_compression_level)
         return real_run_job(
@@ -176,6 +177,7 @@ def test_run_jobs_batch_explicit_level_overrides_settings(
         seven_zip_compression_level=3,
         cancel=None,
         prefer_py7zr=None,
+        threads=None,
     ):
         captured.append(zip_compression_level)
         return real_run_job(
@@ -224,6 +226,7 @@ def test_run_jobs_batch_passes_seven_zip_level_from_settings(
         seven_zip_compression_level=3,
         cancel=None,
         prefer_py7zr=None,
+        threads=None,
     ):
         captured.append(seven_zip_compression_level)
         return real_run_job(
@@ -266,6 +269,7 @@ def test_run_jobs_batch_explicit_seven_zip_level_overrides_settings(
         seven_zip_compression_level=3,
         cancel=None,
         prefer_py7zr=None,
+        threads=None,
     ):
         captured.append(seven_zip_compression_level)
         return real_run_job(
@@ -373,3 +377,92 @@ def test_run_jobs_batch_cancel_emits_cancelled(
     )
     assert seen
     assert all(p.status == "cancelled" for _, p in seen)
+
+
+def test_run_jobs_batch_caps_7z_threads_when_concurrent(
+    sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch
+):
+    # NTH-005: with max_workers>1 the batch must cap 7z threads so concurrent
+    # jobs don't oversubscribe the CPU.
+    import os
+
+    import abackup.core.runner as runner_mod
+
+    captured = []
+    real_run_job = runner_mod.run_job
+
+    def spy(
+        job,
+        *,
+        config_dir=None,
+        data_dir=None,
+        on_progress=None,
+        clock=None,
+        zip_compression_level=6,
+        seven_zip_compression_level=3,
+        prefer_py7zr=None,
+        threads=None,
+        cancel=None,
+    ):
+        captured.append(threads)
+        return real_run_job(
+            job,
+            config_dir=config_dir,
+            data_dir=data_dir,
+            on_progress=on_progress,
+            clock=clock,
+            zip_compression_level=zip_compression_level,
+            seven_zip_compression_level=seven_zip_compression_level,
+            prefer_py7zr=prefer_py7zr,
+            threads=threads,
+            cancel=cancel,
+        )
+
+    monkeypatch.setattr(runner_mod, "run_job", spy)
+    jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(4)]
+    run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=4)
+    cpu = os.cpu_count() or 1
+    expected = max(1, cpu // 4)
+    assert captured == [expected] * 4
+
+
+def test_run_jobs_batch_single_worker_uses_no_thread_cap(
+    sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch
+):
+    # Single-worker runs keep threads=None so 7z uses all cores (fast path).
+    import abackup.core.runner as runner_mod
+
+    captured = []
+    real_run_job = runner_mod.run_job
+
+    def spy(
+        job,
+        *,
+        config_dir=None,
+        data_dir=None,
+        on_progress=None,
+        clock=None,
+        zip_compression_level=6,
+        seven_zip_compression_level=3,
+        prefer_py7zr=None,
+        threads=None,
+        cancel=None,
+    ):
+        captured.append(threads)
+        return real_run_job(
+            job,
+            config_dir=config_dir,
+            data_dir=data_dir,
+            on_progress=on_progress,
+            clock=clock,
+            zip_compression_level=zip_compression_level,
+            seven_zip_compression_level=seven_zip_compression_level,
+            prefer_py7zr=prefer_py7zr,
+            threads=threads,
+            cancel=cancel,
+        )
+
+    monkeypatch.setattr(runner_mod, "run_job", spy)
+    jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(2)]
+    run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=1)
+    assert captured == [None, None]

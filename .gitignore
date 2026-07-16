@@ -172,3 +172,15 @@ node_modules/
 #.idea/
 
 abackup.egg-info/
+
+_backup/
+
+# Desloppify local state (should not be committed)
+.desloppify/
+.claude/
+scorecard.png
+
+# Docs are tracked only on local branches; excluded from GitHub pushes.
+# To commit docs locally: `git add -f docs/`. They stay out of remote pushes
+# because this ignore rule applies to every branch.
+docs/

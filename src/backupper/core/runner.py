@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 from datetime import datetime
-from typing import Callable, List, Optional
+from pathlib import Path
+from typing import Callable
 
 from abackup.config import load_jobs, save_jobs, load_settings
 from abackup.core.backup import BackupResult, run_job
@@ -14,12 +16,14 @@ from abackup.core.progress import Progress, PHASE_CANCELLED, STATUS_CANCELLED
 from abackup.models import BackupJob
 
 # Signature: on_job_done(job_id, result)
-ProgressFn = Callable[[str, BackupResult], None]
+JobDoneFn = Callable[[str, BackupResult], None]
 # Signature: on_progress(job_id, progress_snapshot)
 JobProgressFn = Callable[[str, Progress], None]
+# Signature: clock() -> current timestamp (injectable for testing)
+ClockFn = Callable[[], datetime]
 
 
-def _cancelled_result(job: "BackupJob", clock) -> BackupResult:
+def _cancelled_result(job: BackupJob, clock: ClockFn) -> BackupResult:
     """Build a 'cancelled' result (with an updated job) for a job that did not run."""
     updated = BackupJob(
         **{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "cancelled"}
@@ -28,19 +32,19 @@ def _cancelled_result(job: "BackupJob", clock) -> BackupResult:
 
 
 def run_jobs_batch(
-    jobs: List[BackupJob],
+    jobs: list[BackupJob],
     *,
-    config_dir=None,
-    data_dir=None,
+    config_dir: str | Path | None = None,
+    data_dir: str | Path | None = None,
     max_workers: int = 4,
-    on_job_done: Optional[ProgressFn] = None,
-    on_progress: Optional[JobProgressFn] = None,
-    clock=None,
+    on_job_done: JobDoneFn | None = None,
+    on_progress: JobProgressFn | None = None,
+    clock: ClockFn | None = None,
     zip_compression_level: int | None = None,
     seven_zip_compression_level: int | None = None,
     prefer_py7zr: bool | None = None,
-    cancel: Optional[threading.Event] = None,
-) -> List[BackupResult]:
+    cancel: threading.Event | None = None,
+) -> list[BackupResult]:
     """Run every job concurrently using a bounded worker-thread pool + queue.
 
     Jobs are enqueued and consumed by ``min(max_workers, len(jobs))`` worker
@@ -66,7 +70,7 @@ def run_jobs_batch(
 
     order = [j.id for j in jobs]
     results: dict[str, BackupResult] = {}
-    q: "queue.Queue[Optional[BackupJob]]" = queue.Queue()
+    q: "queue.Queue[BackupJob | None]" = queue.Queue()
     for job in jobs:
         q.put(job)
 
@@ -104,9 +108,12 @@ def run_jobs_batch(
                     zip_compression_level=zip_compression_level,
                     seven_zip_compression_level=seven_zip_compression_level,
                     prefer_py7zr=prefer_py7zr,
+                    threads=seven_zip_threads,
                     cancel=cancel,
                     on_progress=(
-                        (lambda p: on_progress(job.id, p)) if on_progress else None
+                        (lambda p, _job=job: on_progress(_job.id, p))
+                        if on_progress
+                        else None
                     ),
                 )
                 if result.updated_job is not None:
@@ -120,6 +127,10 @@ def run_jobs_batch(
                 q.task_done()
 
     n_workers = max(1, min(max_workers, len(jobs)))
+    # Cap 7z threads so concurrent 7z jobs don't oversubscribe the CPU (NTH-005).
+    # Single-worker runs keep seven_zip_threads=None so 7z uses all cores (fast path).
+    cpu = os.cpu_count() or 1
+    seven_zip_threads = max(1, cpu // n_workers) if n_workers > 1 else None
     threads = [
         threading.Thread(target=worker, name=f"backup-worker-{i}", daemon=True)
         for i in range(n_workers)

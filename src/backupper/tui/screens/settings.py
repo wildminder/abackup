@@ -8,7 +8,12 @@ from textual.containers import Vertical, Horizontal, ScrollableContainer
 from textual.screen import Screen
 from textual.widgets import Input, Select, Static, Button, Header, Footer, Label, Checkbox
 
-from abackup.config import load_settings, save_settings, relocate_storage
+from abackup.config import (
+    load_settings,
+    save_settings,
+    relocate_storage,
+    relocate_data,
+)
 from abackup.models import Settings
 from abackup.utils.errors import ConfigError
 
@@ -92,6 +97,15 @@ class SettingsScreen(Screen):
                 classes="field",
             ),
             Vertical(
+                Label("Theme", classes="field-label"),
+                Select(
+                    [("Dark", "dark"), ("Light", "light")],
+                    id="theme",
+                    prompt="Theme",
+                ),
+                classes="field",
+            ),
+            Vertical(
                 Label("Default destination (optional)", classes="field-label"),
                 Input(id="default_dest", placeholder="pre-filled for new jobs"),
                 Static("Used as the destination when creating a new job.", classes="field-hint"),
@@ -128,6 +142,7 @@ class SettingsScreen(Screen):
         self.query_one("#sz_level", Input).value = str(self._existing.seven_zip_compression_level)
         self.query_one("#workers", Input).value = str(self._existing.max_workers)
         self.query_one("#log_level", Select).value = self._existing.log_level
+        self.query_one("#theme", Select).value = self._existing.theme
         self.query_one("#default_dest", Input).value = self._existing.default_destination or ""
         self.query_one("#prefer_py7zr", Checkbox).value = self._existing.prefer_py7zr
 
@@ -146,6 +161,7 @@ class SettingsScreen(Screen):
             sz_level = int(self.query_one("#sz_level", Input).value)
             workers = int(self.query_one("#workers", Input).value)
             log_level = self.query_one("#log_level", Select).value
+            theme = self.query_one("#theme", Select).value
             default_dest = self.query_one("#default_dest", Input).value.strip() or None
             prefer_py7zr = self.query_one("#prefer_py7zr", Checkbox).value
         except ValueError as exc:
@@ -160,6 +176,7 @@ class SettingsScreen(Screen):
             zip_compression_level=zip_level,
             seven_zip_compression_level=sz_level,
             prefer_py7zr=prefer_py7zr,
+            theme=theme,
             created_at=self._existing.created_at,
         )
         try:
@@ -172,10 +189,17 @@ class SettingsScreen(Screen):
         new = Path(config_dir).resolve()
         if new != old:
             relocate_storage(old, new)
+            # The storage directory is the single storage root, so move the
+            # run history (logs + manifests) too.
+            relocate_data(old, new)
             self.app.config_dir = str(new)
             self.config_dir = str(new)
+            self.app.data_dir = str(new)
+            self.data_dir = str(new)
 
         save_settings(updated, self.config_dir)
+        # Apply the chosen theme live (light/dark).
+        self.app.apply_theme(theme)
 
         # Return to the main menu, refreshing it with the (possibly new) location.
         self.app.pop_screen()

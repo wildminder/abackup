@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
+import threading
+
+from abackup.config import _atomic_write
 from abackup.core.compression import make_archive, make_zip
 from abackup.core.copy import copy_tree
 from abackup.core.paths import get_data_dir, ensure_dir
 from abackup.core.progress import (
     Progress,
+    OptionalProgressCallback,
     PHASE_DONE,
     PHASE_FAILED,
     PHASE_CANCELLED,
@@ -23,8 +26,6 @@ from abackup.core.progress import (
 from abackup.models import BackupJob, BackupMethod
 from abackup.utils.errors import SourceNotFound, DestinationError, JobCancelled
 from abackup.utils.logging import RunLogger
-
-ProgressFn = Callable[[int, int, str], None]
 
 
 def _now() -> datetime:
@@ -37,9 +38,9 @@ class BackupResult:
     method: str
     status: str
     summary: dict
-    manifest_path: Optional[str] = None
-    error: Optional[str] = None
-    updated_job: Optional[BackupJob] = None
+    manifest_path: str | None = None
+    error: str | None = None
+    updated_job: BackupJob | None = None
 
 
 def run_job(
@@ -47,12 +48,14 @@ def run_job(
     *,
     config_dir: str | Path | None = None,
     data_dir: str | Path | None = None,
-    on_progress: Optional[ProgressFn] = None,
-    clock=None,
+    on_progress: OptionalProgressCallback = None,
+    clock: Callable[[], datetime] | None = None,
     zip_compression_level: int = 6,
     seven_zip_compression_level: int = 3,
     prefer_py7zr: bool = True,
-    cancel=None,
+    use_hash: bool = False,
+    threads: int | None = None,
+    cancel: threading.Event | None = None,
 ) -> BackupResult:
     """Run a single backup job.
 
@@ -111,11 +114,11 @@ def run_job(
                 job.source,
                 job.destination,
                 compress_level=seven_zip_compression_level,
-                prefer_7z=True,
                 prefer_py7zr=prefer_py7zr,
                 cancel=cancel,
                 job_id=job.id,
                 on_progress=_forward,
+                threads=threads,
             )
             summary = {"archive": str(out)}
         else:
@@ -124,6 +127,7 @@ def run_job(
                 job.destination,
                 job_id=job.id,
                 on_progress=_forward,
+                use_hash=use_hash,
                 cancel=cancel,
             )
         status = "success"
@@ -155,9 +159,7 @@ def run_job(
         "summary": summary,
     }
     manifest_path = Path(data_dir) / "manifests" / f"{job.id}.json"
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    _atomic_write(manifest_path, manifest)
     logger.log("info", manifest)
 
     updated = BackupJob(

@@ -1,8 +1,6 @@
 from abackup.core.progress import (
     Progress,
-    PHASE_COPYING,
     PHASE_DONE,
-    STATUS_RUNNING,
     STATUS_SUCCESS,
 )
 

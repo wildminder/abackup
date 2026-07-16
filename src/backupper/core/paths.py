@@ -40,6 +40,18 @@ def get_data_dir(override: str | Path | None = None) -> Path:
     return Path(platformdirs.user_data_dir("abackup", "abackup"))
 
 
+def is_inside(child: str | Path, parent: str | Path) -> bool:
+    """Return ``True`` if ``child`` resolves to ``parent`` or lives under it.
+
+    Used to reject a backup destination that is the source itself or a
+    subfolder of the source (which would recurse / overwrite). Resolution is
+    injected via ``Path.resolve`` so symlinks and ``..`` are normalized.
+    """
+    child_path = Path(child).resolve()
+    parent_path = Path(parent).resolve()
+    return child_path == parent_path or parent_path in child_path.parents
+
+
 def ensure_dir(path: str | Path) -> Path:
     """Create ``path`` (and parents) if missing. Idempotent."""
     p = Path(path)
@@ -55,6 +67,33 @@ def safe_archive_name(source_name: str, when: date | None = None, ext: str = ".z
     when = when or date.today()
     base = _UNSAFE.sub("_", source_name).strip("_") or "backup"
     return f"{base}_{when.isoformat()}{ext}"
+
+
+def unique_archive_name(
+    source_name: str,
+    when: date | None = None,
+    ext: str = ".zip",
+    dest_dir: str | Path = ".",
+) -> str:
+    """Collision-free archive name: ``<base>_<YYYY-MM-DD>[_N]<ext>``.
+
+    The first run on a given day yields ``<base>_<YYYY-MM-DD><ext>``; subsequent
+    same-day runs append an incrementing ``_N`` so a previous archive is never
+    overwritten (fixes NTH-006). ``dest_dir`` scopes the collision check.
+    """
+    when = when or date.today()
+    base = _UNSAFE.sub("_", source_name).strip("_") or "backup"
+    stem = f"{base}_{when.isoformat()}"
+    dest = Path(dest_dir)
+    candidate = f"{stem}{ext}"
+    if not (dest / candidate).exists():
+        return candidate
+    i = 1
+    while True:
+        candidate = f"{stem}_{i}{ext}"
+        if not (dest / candidate).exists():
+            return candidate
+        i += 1
 
 
 def settings_file_path(config_dir: str | Path) -> Path:

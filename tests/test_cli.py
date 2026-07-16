@@ -1,7 +1,7 @@
 import pytest
 
 from abackup.cli import build_parser, main
-from abackup.config import load_settings, save_settings, load_jobs, save_jobs
+from abackup.config import save_settings, load_jobs, save_jobs
 from abackup.models import BackupJob, Settings
 
 
@@ -111,3 +111,40 @@ def test_cli_show_settings_reflects_default_location(tmp_config, tmp_data, capsy
     out = capsys.readouterr().out
     data = _json.loads(out)
     assert data["config_dir"] == tmp_config
+
+
+def test_cli_run_all_uses_config_dir_as_data_dir(tmp_config, sample_tree, tmp_path, monkeypatch):
+    # The storage directory is the single storage root: when --data-dir is
+    # omitted, run-all must use config_dir for logs/manifests too.
+    jobs = [
+        BackupJob(
+            source=str(sample_tree),
+            destination=str(tmp_path / "out"),
+            method="copy",
+            name="job",
+        )
+    ]
+    save_jobs(jobs, tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    captured = {}
+
+    def fake_run(
+        jobs,
+        *,
+        config_dir=None,
+        data_dir=None,
+        max_workers=4,
+        on_job_done=None,
+        clock=None,
+        prefer_py7zr=None,
+        seven_zip_compression_level=None,
+    ):
+        captured["config_dir"] = config_dir
+        captured["data_dir"] = data_dir
+        return []
+
+    monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
+    main(["--run-all", "--config-dir", tmp_config])
+    assert captured["config_dir"] == tmp_config
+    assert captured["data_dir"] == tmp_config

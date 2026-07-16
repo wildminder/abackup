@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
-from textual.containers import Vertical, Horizontal
+from textual.containers import Horizontal
 from textual.screen import Screen
 from textual.widgets import ListView, ListItem, Label, Button, Header, Footer, Static
 
@@ -14,6 +13,23 @@ from abackup.core.paths import format_job_label
 
 
 class MainMenuScreen(Screen):
+    CSS = """
+    #key_help {
+        padding: 0 1;
+        color: $text-muted;
+        height: 1;
+    }
+    ListItem {
+        padding: 0 1;
+    }
+    /* Highlight the keyboard-selected job (NTH-002). */
+    ListItem:focus {
+        background: $accent;
+        color: $text;
+        text-style: bold;
+    }
+    """
+
     def __init__(self, config_dir, data_dir):
         super().__init__()
         self.config_dir = config_dir
@@ -32,6 +48,10 @@ class MainMenuScreen(Screen):
             Button("Quit", id="quit"),
         )
         yield Static("", id="status")
+        yield Static(
+            "↑/↓ select · Enter run · A add · D delete · R run all · S settings",
+            id="key_help",
+        )
         yield Footer()
 
     def on_mount(self) -> None:
@@ -58,9 +78,9 @@ class MainMenuScreen(Screen):
         jobs = load_jobs(self.config_dir)
         list_view = self.query_one("#jobs", ListView)
         if event.button.id == "add":
-            from abackup.tui.screens.first_run import FirstRunScreen
+            from abackup.tui.screens.add_job import AddJobScreen
 
-            self.app.push_screen(FirstRunScreen(self.config_dir, self.data_dir))
+            self.app.push_screen(AddJobScreen(self.config_dir, self.data_dir))
             return
         if event.button.id == "run_all":
             from abackup.tui.screens.run_all import RunAllScreen

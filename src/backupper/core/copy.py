@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 import os
-import shutil
 import tempfile
+import threading
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
+from abackup.core.constants import CHUNK
 from abackup.core.progress import (
     Progress,
     PHASE_COPYING,
     OptionalProgressCallback,
 )
 from abackup.utils.errors import SourceNotFound, DestinationError, JobCancelled
-
-# Copy in 1 MiB chunks: small enough for smooth progress, large enough for throughput.
-CHUNK = 1024 * 1024
 
 # Signature of the per-file progress emitter passed into _atomic_copy_file.
 # It receives (bytes_copied_in_current_file, current_relative_path) and the
@@ -31,7 +29,12 @@ def _iter_files(source: Path):
 
 
 def _atomic_copy_file(
-    src: Path, target: Path, *, cancel=None, emit: Optional[_Emit] = None, current_file: str = ""
+    src: Path,
+    target: Path,
+    *,
+    cancel: threading.Event | None = None,
+    emit: _Emit | None = None,
+    current_file: str = "",
 ) -> None:
     """Copy ``src`` to ``target`` atomically (temp file + rename), preserving mtime.
 
@@ -65,6 +68,38 @@ def _atomic_copy_file(
     os.utime(target, (s.st_atime, s.st_mtime))
 
 
+def _files_equal(
+    s_stat: "os.stat_result",
+    t_stat: "os.stat_result",
+    src: Path,
+    tgt: Path,
+    *,
+    use_hash: bool = False,
+) -> bool:
+    """Decide whether ``src`` and ``tgt`` already represent the same content.
+
+    By default (FAT32-safe) we compare only file size: FAT32 truncates mtime
+    to 2 seconds, so an mtime-based skip would needlessly re-copy identical
+    files. When ``use_hash`` is set we also compare a streaming BLAKE2b hash
+    for stronger change detection (catches same-size content edits).
+    """
+    if s_stat.st_size != t_stat.st_size:
+        return False
+    if not use_hash:
+        return True
+    return _hash_file(src) == _hash_file(tgt)
+
+
+def _hash_file(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.blake2b()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def copy_tree(
     source: str | Path,
     destination: str | Path,
@@ -72,6 +107,7 @@ def copy_tree(
     job_id: str = "",
     on_progress: OptionalProgressCallback = None,
     overwrite: bool = True,
+    use_hash: bool = False,
     cancel=None,
 ) -> dict:
     """Mirror ``source`` into ``destination``.
@@ -122,29 +158,39 @@ def copy_tree(
     if on_progress is not None:
         emit(0, "")
 
+    failed_files: list[dict] = []
     for f in files:
         if cancel is not None and cancel.is_set():
             raise JobCancelled("Copy cancelled")
         rel = f.relative_to(src)
         target = dst / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists():
-            if not overwrite:
-                skipped += 1
-            else:
-                s_stat = f.stat()
-                t_stat = target.stat()
-                # Skip if identical (size + mtime) to avoid needless rewrites.
-                if s_stat.st_size == t_stat.st_size and s_stat.st_mtime == t_stat.st_mtime:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                if not overwrite:
                     skipped += 1
                 else:
-                    _atomic_copy_file(f, target, cancel=cancel, emit=emit, current_file=str(rel))
-                    copied += 1
-                    bytes_copied += s_stat.st_size
-        else:
-            _atomic_copy_file(f, target, cancel=cancel, emit=emit, current_file=str(rel))
-            copied += 1
-            bytes_copied += f.stat().st_size
+                    s_stat = f.stat()
+                    t_stat = target.stat()
+                    # Skip if identical. By default we compare size only
+                    # (FAT32-safe); with use_hash we also compare content.
+                    if _files_equal(s_stat, t_stat, f, target, use_hash=use_hash):
+                        skipped += 1
+                    else:
+                        _atomic_copy_file(f, target, cancel=cancel, emit=emit, current_file=str(rel))
+                        copied += 1
+                        bytes_copied += s_stat.st_size
+            else:
+                _atomic_copy_file(f, target, cancel=cancel, emit=emit, current_file=str(rel))
+                copied += 1
+                bytes_copied += f.stat().st_size
+        except JobCancelled:
+            raise
+        except (DestinationError, OSError) as exc:
+            # One un-copyable file (e.g. locked) must not abort the whole job.
+            # Record it and continue with the rest; the count is surfaced in
+            # the summary and the run manifest.
+            failed_files.append({"file": str(rel), "error": str(exc)})
         # Per-file emit: file count advances, bytes already accounted for.
         emit(0, str(rel))
 
@@ -152,5 +198,7 @@ def copy_tree(
         "files_total": total,
         "files_copied": copied,
         "files_skipped": skipped,
+        "files_failed": len(failed_files),
+        "failed_files": failed_files,
         "bytes_copied": bytes_copied,
     }

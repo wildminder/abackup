@@ -41,6 +41,7 @@ class Settings:
     zip_compression_level: int = 6
     seven_zip_compression_level: int = 3
     prefer_py7zr: bool = False
+    theme: str = "dark"
     created_at: str = field(default_factory=lambda: _now().isoformat())
 
     def to_dict(self) -> dict[str, Any]:
@@ -66,6 +67,8 @@ class Settings:
             raise ConfigError("max_workers must be >= 1")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
             raise ConfigError("log_level must be one of DEBUG/INFO/WARNING/ERROR")
+        if self.theme not in {"light", "dark"}:
+            raise ConfigError("theme must be one of light/dark")
 
 
 @dataclass

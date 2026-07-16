@@ -9,6 +9,18 @@ def test_settings_round_trip():
     assert s2.default_destination == "D:/x"
 
 
+def test_settings_theme_defaults_to_dark():
+    assert Settings().theme == "dark"
+
+
+def test_settings_theme_validation_rejects_invalid():
+    try:
+        Settings(theme="neon").validate()
+    except ConfigError:
+        return
+    raise AssertionError("expected ConfigError")
+
+
 def test_backup_method_from_str_invalid():
     try:
         BackupMethod.from_str("nope")

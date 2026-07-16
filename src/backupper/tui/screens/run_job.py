@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import ProgressBar, Static, Button
 
@@ -46,14 +45,13 @@ class RunJobScreen(Screen):
                 f"{mb_done:.1f}/{mb_total:.1f} MB"
             )
 
+        settings = load_settings(self.config_dir)
         result = run_job(
             self.job,
             config_dir=self.config_dir,
             data_dir=self.data_dir,
-            prefer_py7zr=load_settings(self.config_dir).prefer_py7zr,
-            seven_zip_compression_level=load_settings(
-                self.config_dir
-            ).seven_zip_compression_level,
+            prefer_py7zr=settings.prefer_py7zr,
+            seven_zip_compression_level=settings.seven_zip_compression_level,
             on_progress=on_progress,
         )
         self.query_one("#progress", ProgressBar).update(progress=100)

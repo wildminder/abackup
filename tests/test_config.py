@@ -7,9 +7,10 @@ from abackup.config import (
     save_jobs,
     init_storage,
     relocate_storage,
+    relocate_data,
     maybe_migrate_legacy_config,
 )
-from abackup.models import BackupJob, BackupMethod, Settings
+from abackup.models import BackupJob, Settings
 from abackup.utils.errors import ConfigError
 
 
@@ -107,10 +108,88 @@ def test_legacy_migration_moves_files(tmp_path, monkeypatch):
     legacy.mkdir()
     (legacy / "settings.json").write_text('{"first_run_completed": true}', encoding="utf-8")
     (legacy / "jobs.json").write_text("[]", encoding="utf-8")
+    # Legacy data dir (logs/manifests) lives under the platformdirs data root.
+    legacy_data = tmp_path / "legacy_data"
+    legacy_data.mkdir()
+    (legacy_data / "logs").mkdir()
+    (legacy_data / "logs" / "x.jsonl").write_text("{}")
+    (legacy_data / "manifests").mkdir()
+    (legacy_data / "manifests" / "y.json").write_text("{}")
     new = tmp_path / "newhome" / "abackup"
     monkeypatch.setattr("abackup.config.LEGACY_DIR", legacy)
     monkeypatch.setattr("abackup.config.default_config_dir", lambda: new)
+    monkeypatch.setattr("abackup.config.get_data_dir", lambda override=None: legacy_data)
     maybe_migrate_legacy_config()
     assert (new / "settings.json").exists()
     assert (new / "jobs.json").exists()
     assert not (legacy / "settings.json").exists()
+    # Run history (logs + manifests) is relocated too.
+    assert (new / "logs" / "x.jsonl").exists()
+    assert (new / "manifests" / "y.json").exists()
+    assert not (legacy_data / "logs").exists()
+    assert not (legacy_data / "manifests").exists()
+
+
+def test_relocate_data_moves_logs_and_manifests(tmp_path):
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "logs").mkdir()
+    (old / "logs" / "x.jsonl").write_text("{}")
+    (old / "manifests").mkdir()
+    (old / "manifests" / "y.json").write_text("{}")
+    new = tmp_path / "new"
+    relocate_data(old, new)
+    assert (new / "logs" / "x.jsonl").exists()
+    assert (new / "manifests" / "y.json").exists()
+    assert not (old / "logs").exists()
+    assert not (old / "manifests").exists()
+
+
+def test_relocate_data_idempotent_same_dir(tmp_path):
+    old = tmp_path / "same"
+    old.mkdir()
+    (old / "logs").mkdir()
+    (old / "logs" / "x.jsonl").write_text("{}")
+    relocate_data(old, old)
+    assert (old / "logs" / "x.jsonl").exists()
+
+
+def test_relocate_data_creates_new_dir(tmp_path):
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "logs").mkdir()
+    (old / "logs" / "x.jsonl").write_text("{}")
+    new = tmp_path / "new" / "nested"
+    relocate_data(old, new)
+    assert new.is_dir()
+    assert (new / "logs" / "x.jsonl").exists()
+
+
+def test_relocate_data_no_tmp_leftovers(tmp_path):
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "logs").mkdir()
+    (old / "logs" / "x.jsonl").write_text("{}")
+    new = tmp_path / "new"
+    relocate_data(old, new)
+    assert list(tmp_path.rglob("*.tmp")) == []
+
+
+def test_relocate_storage_also_moves_data(tmp_path):
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "settings.json").write_text("{}", encoding="utf-8")
+    (old / "jobs.json").write_text("[]", encoding="utf-8")
+    (old / "logs").mkdir()
+    (old / "logs" / "x.jsonl").write_text("{}")
+    (old / "manifests").mkdir()
+    (old / "manifests" / "y.json").write_text("{}")
+    new = tmp_path / "new"
+    relocate_storage(old, new)
+    relocate_data(old, new)
+    assert (new / "settings.json").exists()
+    assert (new / "jobs.json").exists()
+    assert (new / "logs" / "x.jsonl").exists()
+    assert (new / "manifests" / "y.json").exists()
+    assert not (old / "settings.json").exists()
+    assert not (old / "logs").exists()

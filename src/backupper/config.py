@@ -11,6 +11,7 @@ from typing import Any
 
 from abackup.core.paths import (
     get_config_dir,
+    get_data_dir,
     ensure_dir,
     settings_file_path,
     jobs_file_path,
@@ -97,6 +98,28 @@ def relocate_storage(old_dir, new_dir) -> Path:
     return new
 
 
+def relocate_data(old_data_dir, new_data_dir) -> Path:
+    """Atomically move run logs + manifests from old to new data dir.
+
+    Moves every subdirectory of ``old`` (``logs/``, ``manifests/``, and any
+    future subdir) to ``new`` via ``os.replace`` (atomic). No-op if the dirs
+    are equal. Returns the new data dir.
+    """
+    old = Path(old_data_dir)
+    new = Path(new_data_dir)
+    if old.resolve() == new.resolve():
+        return new
+    ensure_dir(new)
+    new_resolved = new.resolve()
+    for sub in (p for p in old.iterdir() if p.is_dir()):
+        # Guard against the (unusual) case where the destination lives inside
+        # the source: never try to move the destination into itself.
+        if sub.resolve() == new_resolved:
+            continue
+        os.replace(sub, new / sub.name)
+    return new
+
+
 def maybe_migrate_legacy_config() -> None:
     """One-time migration from the old ``platformdirs`` location to the new
     home-based default. No-op if the new location already has settings or the
@@ -106,6 +129,8 @@ def maybe_migrate_legacy_config() -> None:
         return
     if settings_file_path(LEGACY_DIR).exists():
         relocate_storage(LEGACY_DIR, new_default)
+        # Move run history (logs/manifests) too, so it isn't orphaned.
+        relocate_data(get_data_dir(), new_default)
 
 
 def init_storage(config_dir: str | Path | None = None) -> Path:

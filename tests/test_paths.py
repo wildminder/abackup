@@ -6,6 +6,7 @@ from abackup.core.paths import (
     get_data_dir,
     ensure_dir,
     safe_archive_name,
+    unique_archive_name,
     settings_file_path,
     jobs_file_path,
     default_config_dir,
@@ -59,6 +60,41 @@ def test_safe_archive_name_fallback_empty():
 def test_safe_archive_name_custom_ext():
     name = safe_archive_name("My Docs", date(2026, 1, 1), ext=".7z")
     assert name == "My_Docs_2026-01-01.7z"
+
+
+def test_unique_archive_name_first_run(tmp_path):
+    # Empty destination -> plain dated name (backward compatible).
+    name = unique_archive_name("source", date(2026, 7, 12), dest_dir=tmp_path)
+    assert name == "source_2026-07-12.zip"
+    assert not (tmp_path / name).exists()
+
+
+def test_unique_archive_name_sequential(tmp_path):
+    # Same-day re-runs get an incrementing suffix; nothing is overwritten.
+    first = unique_archive_name("source", date(2026, 7, 12), dest_dir=tmp_path)
+    (tmp_path / first).write_text("v1")
+    second = unique_archive_name("source", date(2026, 7, 12), dest_dir=tmp_path)
+    (tmp_path / second).write_text("v2")
+    third = unique_archive_name("source", date(2026, 7, 12), dest_dir=tmp_path)
+    (tmp_path / third).write_text("v3")
+    assert first == "source_2026-07-12.zip"
+    assert second == "source_2026-07-12_1.zip"
+    assert third == "source_2026-07-12_2.zip"
+    # All three coexist.
+    assert (tmp_path / first).read_text() == "v1"
+    assert (tmp_path / second).read_text() == "v2"
+    assert (tmp_path / third).read_text() == "v3"
+
+
+def test_unique_archive_name_sanitizes(tmp_path):
+    name = unique_archive_name("a/b:c*?", date(2026, 1, 1), dest_dir=tmp_path)
+    assert "/" not in name
+    assert name.endswith(".zip")
+
+
+def test_unique_archive_name_custom_ext(tmp_path):
+    name = unique_archive_name("source", date(2026, 1, 1), ext=".7z", dest_dir=tmp_path)
+    assert name == "source_2026-01-01.7z"
 
 
 def test_file_paths(tmp_path):

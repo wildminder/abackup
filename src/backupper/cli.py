@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 
 from abackup import __version__
 from abackup.config import load_jobs, load_settings
 from abackup.core.paths import get_config_dir
+from abackup.core.backup import BackupResult
 from abackup.core.runner import run_jobs_batch
 from abackup.tui.app import ABackupApp
 
@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_batch_summary(results) -> None:
+def _print_batch_summary(results: list[BackupResult]) -> None:
     success = sum(1 for r in results if r.status == "success")
     failed = len(results) - success
     for r in results:
@@ -66,7 +66,7 @@ def main(argv=None) -> None:
         results = run_jobs_batch(
             jobs,
             config_dir=args.config_dir,
-            data_dir=args.data_dir,
+            data_dir=args.data_dir or args.config_dir,
             max_workers=max_workers,
             prefer_py7zr=settings.prefer_py7zr,
             seven_zip_compression_level=settings.seven_zip_compression_level,

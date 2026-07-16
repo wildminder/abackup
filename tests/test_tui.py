@@ -1,11 +1,9 @@
-import pytest
-from pathlib import Path
-from textual.widgets import Input, RadioButton, Static, Button, ProgressBar, ListView, Label
+from textual.widgets import Input, RadioButton, Static, Button, ProgressBar, ListView, Label, Select
 
 from abackup.cli import ABackupApp
 from abackup.config import load_jobs, load_settings, save_jobs, save_settings
 from abackup.models import BackupJob, Settings
-from abackup.tui.screens.first_run import FirstRunScreen
+from abackup.tui.screens.add_job import AddJobScreen
 from abackup.tui.screens.main_menu import MainMenuScreen
 from abackup.tui.screens.run_job import RunJobScreen
 from abackup.tui.screens.run_all import RunAllScreen
@@ -21,7 +19,7 @@ async def test_add_job_wizard_creates_job(
         assert isinstance(app.screen, MainMenuScreen)
         await pilot.click("#add")
         await pilot.pause()
-        assert isinstance(app.screen, FirstRunScreen)
+        assert isinstance(app.screen, AddJobScreen)
 
         app.screen.query_one("#source", Input).value = str(sample_tree)
         app.screen.query_one("#dest", Input).value = str(dest_dir)
@@ -43,7 +41,7 @@ async def test_add_job_wizard_creates_7z_job(
         assert isinstance(app.screen, MainMenuScreen)
         await pilot.click("#add")
         await pilot.pause()
-        assert isinstance(app.screen, FirstRunScreen)
+        assert isinstance(app.screen, AddJobScreen)
 
         app.screen.query_one("#source", Input).value = str(sample_tree)
         app.screen.query_one("#dest", Input).value = str(dest_dir)
@@ -63,14 +61,14 @@ async def test_add_job_wizard_rejects_missing_source(tmp_config, tmp_data, dest_
         assert isinstance(app.screen, MainMenuScreen)
         await pilot.click("#add")
         await pilot.pause()
-        assert isinstance(app.screen, FirstRunScreen)
+        assert isinstance(app.screen, AddJobScreen)
 
         app.screen.query_one("#source", Input).value = str(dest_dir / "does_not_exist")
         app.screen.query_one("#dest", Input).value = str(dest_dir)
         await pilot.click("#save")
         await pilot.pause()
         # Still on the add-job screen, no job created.
-        assert isinstance(app.screen, FirstRunScreen)
+        assert isinstance(app.screen, AddJobScreen)
         assert load_jobs(tmp_config) == []
 
 
@@ -80,7 +78,7 @@ async def test_add_job_wizard_cancel_returns_to_main_menu(tmp_config, tmp_data):
         assert isinstance(app.screen, MainMenuScreen)
         await pilot.click("#add")
         await pilot.pause()
-        assert isinstance(app.screen, FirstRunScreen)
+        assert isinstance(app.screen, AddJobScreen)
 
         # Cancel returns to the main menu without creating a job.
         await pilot.click("#cancel")
@@ -93,11 +91,22 @@ async def test_main_menu_shows_empty_state(tmp_config, tmp_data):
     # No jobs configured -> app still opens on the main window with an empty
     # table and a clear hint, instead of forcing a first-run wizard.
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
-    async with app.run_test() as pilot:
+    async with app.run_test():
         assert isinstance(app.screen, MainMenuScreen)
         status = app.screen.query_one("#status", Static)
         assert "No jobs yet" in str(status.render())
         assert len(app.screen.query_one("#jobs", ListView).children) == 0
+
+
+async def test_main_menu_shows_key_help(tmp_config, tmp_data):
+    # NTH-002: a one-line key-help footer explains keyboard navigation.
+    save_settings(Settings(), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test():
+        assert isinstance(app.screen, MainMenuScreen)
+        help_text = str(app.screen.query_one("#key_help", Static).render())
+        assert "select" in help_text
+        assert "Enter" in help_text
 
 
 async def test_main_menu_job_label_includes_source_and_destination(
@@ -118,7 +127,7 @@ async def test_main_menu_job_label_includes_source_and_destination(
     save_jobs([job], tmp_config)
     save_settings(Settings(), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
-    async with app.run_test() as pilot:
+    async with app.run_test():
         assert isinstance(app.screen, MainMenuScreen)
         list_view = app.screen.query_one("#jobs", ListView)
         labels = [str(w.render()) for w in list_view.query(Label)]
@@ -191,7 +200,7 @@ async def test_main_menu_add_button(tmp_config, tmp_data):
         assert isinstance(app.screen, MainMenuScreen)
         await pilot.click("#add")
         await pilot.pause()
-        assert isinstance(app.screen, FirstRunScreen)
+        assert isinstance(app.screen, AddJobScreen)
 
 
 async def test_main_menu_run_all_button(tmp_config, tmp_data, sample_tree, dest_dir):
@@ -678,3 +687,157 @@ async def test_settings_save_with_none_config_dir_uses_app(tmp_data, tmp_path):
         app.screen.query_one("#save", Button).press()
         await pilot.pause()
         assert (new_dir / "settings.json").exists()
+
+
+def test_add_job_module_and_class():
+    import abackup.tui.screens.add_job as m
+
+    assert hasattr(m, "AddJobScreen")
+    assert not hasattr(m, "FirstRunScreen")
+
+
+def test_no_first_run_module():
+    import importlib
+
+    try:
+        importlib.import_module("abackup.tui.screens.first_run")
+        raise AssertionError("first_run module should no longer exist")
+    except ImportError:
+        pass
+
+
+async def test_main_menu_add_opens_add_job_screen(tmp_config, tmp_data):
+    save_settings(Settings(), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        await pilot.click("#add")
+        await pilot.pause()
+        assert isinstance(app.screen, AddJobScreen)
+
+
+async def test_add_job_rejects_dest_inside_source(tmp_config, tmp_data, sample_tree, dest_dir):
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        await pilot.click("#add")
+        await pilot.pause()
+        assert isinstance(app.screen, AddJobScreen)
+        app.screen.query_one("#source", Input).value = str(sample_tree)
+        app.screen.query_one("#dest", Input).value = str(sample_tree / "sub")
+        await pilot.click("#save")
+        await pilot.pause()
+        # Still on the add-job screen, no job created.
+        assert isinstance(app.screen, AddJobScreen)
+        assert "Destination must not" in str(
+            app.screen.query_one("#error", Static).render()
+        )
+        assert load_jobs(tmp_config) == []
+
+
+async def test_add_job_rejects_insufficient_disk_space(
+    tmp_config, tmp_data, sample_tree, dest_dir, monkeypatch
+):
+    import types
+
+    monkeypatch.setattr(
+        "abackup.core.validation.shutil.disk_usage",
+        lambda p: types.SimpleNamespace(free=1),
+    )
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        await pilot.click("#add")
+        await pilot.pause()
+        app.screen.query_one("#source", Input).value = str(sample_tree)
+        app.screen.query_one("#dest", Input).value = str(dest_dir)
+        await pilot.click("#save")
+        await pilot.pause()
+        assert isinstance(app.screen, AddJobScreen)
+        assert "Not enough free space" in str(
+            app.screen.query_one("#error", Static).render()
+        )
+        assert load_jobs(tmp_config) == []
+
+
+async def test_add_job_accepts_valid_with_disk_check(
+    tmp_config, tmp_data, sample_tree, dest_dir, monkeypatch
+):
+    import types
+
+    monkeypatch.setattr(
+        "abackup.core.validation.shutil.disk_usage",
+        lambda p: types.SimpleNamespace(free=10**12),
+    )
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        await pilot.click("#add")
+        await pilot.pause()
+        app.screen.query_one("#source", Input).value = str(sample_tree)
+        app.screen.query_one("#dest", Input).value = str(dest_dir)
+        await pilot.click("#save")
+        await pilot.pause()
+        assert isinstance(app.screen, MainMenuScreen)
+        jobs = load_jobs(tmp_config)
+        assert len(jobs) == 1
+
+
+async def test_app_data_dir_equals_config_dir():
+    # The storage directory is the single storage root: config (settings +
+    # jobs) and data (logs + manifests) live together so a relocation moves
+    # everything atomically.
+    app = ABackupApp()
+    async with app.run_test():
+        assert app.data_dir == app.config_dir
+
+
+async def test_settings_relocate_moves_logs_and_manifests(tmp_path):
+    # Seed run history (logs + manifests) in the storage root.
+    old = tmp_path / "old_storage"
+    old.mkdir()
+    (old / "logs").mkdir()
+    (old / "logs" / "x.jsonl").write_text("{}")
+    (old / "manifests").mkdir()
+    (old / "manifests" / "y.json").write_text("{}")
+    new = tmp_path / "new_storage"
+    app = ABackupApp(config_dir=old)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(app.config_dir, app.data_dir))
+        await pilot.pause()
+        app.screen.query_one("#config_dir", Input).value = str(new)
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+        # Run history moved to the new storage root.
+        assert (new / "logs" / "x.jsonl").exists()
+        assert (new / "manifests" / "y.json").exists()
+        # And removed from the old location.
+        assert not (old / "logs").exists()
+        assert not (old / "manifests").exists()
+        # App's data dir now points at the relocated root.
+        assert app.data_dir == str(new)
+
+
+async def test_app_applies_theme_from_settings(tmp_path):
+    # The persisted theme is applied on startup (NTH-001).
+    save_settings(Settings(theme="light"), tmp_path)
+    app = ABackupApp(config_dir=tmp_path)
+    async with app.run_test():
+        assert app.theme_name == "light"
+        assert app.dark is False
+
+
+async def test_settings_theme_toggle_saves_and_applies(tmp_config, tmp_data):
+    save_settings(Settings(), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(app.config_dir, app.data_dir))
+        await pilot.pause()
+        theme = app.screen.query_one("#theme", Select)
+        theme.value = "light"
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+        # Theme persisted and applied live.
+        assert load_settings(tmp_config).theme == "light"
+        assert app.theme_name == "light"
+        assert app.dark is False

@@ -2,8 +2,7 @@ import threading
 from datetime import datetime, timezone
 
 from abackup.core.backup import run_job
-from abackup.models import BackupJob, BackupMethod
-from abackup.utils.errors import SourceNotFound
+from abackup.models import BackupJob
 
 
 def _clock():
@@ -96,6 +95,7 @@ def test_run_job_uses_seven_zip_compression_level(sample_tree, dest_dir, tmp_con
         on_progress=None,
         prefer_7z=True,
         prefer_py7zr=True,
+        threads=None,
     ):
         captured["compress_level"] = compress_level
         return Path(destination) / "x.7z"
@@ -135,6 +135,7 @@ def test_run_job_zip_level_independent_from_seven_zip_level(
         on_progress=None,
         prefer_7z=True,
         prefer_py7zr=True,
+        threads=None,
     ):
         captured.setdefault("seven", compress_level)
         return Path(destination) / "x.7z"
@@ -275,3 +276,49 @@ def test_run_job_cancel_zip_mid_run(sample_tree, dest_dir, tmp_config, tmp_data,
     )
     assert result.status == "cancelled"
     assert result.updated_job.last_status == "cancelled"
+
+
+def test_run_job_manifest_includes_failed_files(sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch):
+    import json
+    from pathlib import Path
+
+    import abackup.core.backup as backup_mod
+
+    def fake_copy_tree(source, destination, **kwargs):
+        return {
+            "files_total": 2,
+            "files_copied": 1,
+            "files_skipped": 0,
+            "files_failed": 1,
+            "failed_files": [{"file": "bad.txt", "error": "locked"}],
+            "bytes_copied": 5,
+        }
+
+    monkeypatch.setattr(backup_mod, "copy_tree", fake_copy_tree)
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
+    result = run_job(job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock)
+    # The job still completes (status success); failures are recorded.
+    assert result.status == "success"
+    manifest = json.loads(Path(result.manifest_path).read_text())
+    assert manifest["summary"]["files_failed"] == 1
+    assert manifest["summary"]["failed_files"][0]["file"] == "bad.txt"
+
+
+def test_run_job_summary_includes_failed_count(sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch):
+    import abackup.core.backup as backup_mod
+
+    def fake_copy_tree(source, destination, **kwargs):
+        return {
+            "files_total": 2,
+            "files_copied": 1,
+            "files_skipped": 0,
+            "files_failed": 1,
+            "failed_files": [{"file": "bad.txt", "error": "locked"}],
+            "bytes_copied": 5,
+        }
+
+    monkeypatch.setattr(backup_mod, "copy_tree", fake_copy_tree)
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
+    result = run_job(job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock)
+    assert result.summary["files_failed"] == 1
+    assert result.summary["failed_files"][0]["error"] == "locked"

@@ -9,7 +9,7 @@ safe to hand the same snapshot across threads without accidental mutation.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable
 
 # Phases a job moves through.
 PHASE_PENDING = "pending"
@@ -56,4 +56,4 @@ class Progress:
 
 
 ProgressCallback = Callable[["Progress"], None]
-OptionalProgressCallback = Optional[ProgressCallback]
+OptionalProgressCallback = ProgressCallback | None
