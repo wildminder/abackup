@@ -32,7 +32,9 @@ Jobs and settings are stored as JSON under a config directory in your home folde
 
 ```bash
 # from the project root (requires Python 3.11+)
-call source .venv/bin/activate
+# Create and activate a virtual environment first, e.g.:
+#   python -m venv .venv && source .venv/bin/activate   # Linux/macOS
+#   python -m venv .venv && .venv\Scripts\activate      # Windows
 uv pip install -e .
 ```
 
@@ -150,7 +152,7 @@ All writes are atomic (temp file + `os.replace`).
 ## Development & tests
 
 ```bash
-call source .venv/bin/activate
+# Activate your virtual environment first (see Install section), then:
 uv pip install -e ".[dev]"
 pytest
 # with coverage gate
