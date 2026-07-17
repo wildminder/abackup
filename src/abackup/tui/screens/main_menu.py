@@ -101,9 +101,13 @@ class MainMenuScreen(Screen):
         self.refresh_jobs()
 
     def _update_button_states(self, jobs: list) -> None:
-        """Enable job-dependent buttons only when at least one job exists."""
+        """Enable job-dependent buttons only when at least one job exists.
+
+        Export/Import are always available: Import is the primary way to
+        bootstrap an empty config, and Export can save settings alone.
+        """
         has_jobs = bool(jobs)
-        for button_id in ("run", "history", "delete", "export", "import"):
+        for button_id in ("run", "history", "delete"):
             self.query_one(f"#{button_id}", Button).disabled = not has_jobs
 
     def refresh_jobs(self) -> None:
@@ -154,7 +158,13 @@ class MainMenuScreen(Screen):
                     return
                 from abackup.tui.screens.portability import PortabilityScreen
 
-                self.app.push_screen(PortabilityScreen(self.config_dir, mode="import"))
+                # Defer the push until after the confirm modal has fully dismissed,
+                # so the new screen isn't lost during the transition.
+                self.app.call_later(
+                    lambda: self.app.push_screen(
+                        PortabilityScreen(self.config_dir, mode="import")
+                    )
+                )
 
             self.app.push_screen(_ConfirmScreen(msg, _do_import))
             return

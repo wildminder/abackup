@@ -125,8 +125,11 @@ async def test_main_menu_shows_empty_state(tmp_config, tmp_data):
         assert "No jobs yet" in str(status.render())
         assert len(app.screen.query_one("#jobs", ListView).children) == 0
         # Job-dependent buttons are disabled until a job exists.
-        for bid in ("run", "history", "delete", "export", "import"):
+        for bid in ("run", "history", "delete"):
             assert app.screen.query_one(f"#{bid}", Button).disabled is True
+        # Export/Import stay available even with no jobs (import bootstraps a config).
+        for bid in ("export", "import"):
+            assert app.screen.query_one(f"#{bid}", Button).disabled is False
         # Unrelated actions remain available.
         assert app.screen.query_one("#add", Button).disabled is False
         assert app.screen.query_one("#run_all", Button).disabled is False
@@ -1178,6 +1181,28 @@ async def test_main_menu_has_export_import_buttons(tmp_config, tmp_data):
         await pilot.pause()
         assert app.screen.query_one("#export", Button) is not None
         assert app.screen.query_one("#import", Button) is not None
+
+
+async def test_main_menu_import_enabled_with_no_jobs(tmp_config, tmp_data):
+    """Import must work even when the job list is empty (bootstraps a config)."""
+    save_settings(Settings(), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Import is NOT disabled by an empty job list.
+        assert app.screen.query_one("#import", Button).disabled is False
+        # Clicking it opens the import modal (after the confirm dialog).
+        await pilot.click("#import")
+        await pilot.pause()
+        from abackup.tui.screens.main_menu import _ConfirmScreen
+
+        assert isinstance(app.screen, _ConfirmScreen)
+        await pilot.click("#yes")
+        await pilot.pause()
+        await pilot.pause()
+        from abackup.tui.screens.portability import PortabilityScreen
+
+        assert isinstance(app.screen, PortabilityScreen)
 
 
 async def test_portability_export_action_writes_file(tmp_config, tmp_data, tmp_path):
