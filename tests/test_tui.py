@@ -261,6 +261,55 @@ async def test_main_menu_per_row_delete_button(tmp_config, tmp_data, sample_tree
         assert load_jobs(tmp_config) == []
 
 
+async def test_main_menu_action_buttons_disabled_without_selection(tmp_config, tmp_data, sample_tree, dest_dir):
+    # When no job is selected/focused, run/history/delete must stay disabled.
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="copy")
+    save_jobs([job], tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        list_view = app.screen.query_one("#jobs", ListView)
+        # Simulate losing the selection (e.g. after deleting the focused row).
+        list_view.index = None
+        await pilot.pause()
+        # Highlight handler should have disabled the selection-dependent buttons.
+        assert app.screen.query_one("#run", Button).disabled is True
+        assert app.screen.query_one("#history", Button).disabled is True
+        assert app.screen.query_one("#delete", Button).disabled is True
+        # Export still works (acts on all jobs, not the selection).
+        assert app.screen.query_one("#export", Button).disabled is False
+
+
+async def test_main_menu_action_buttons_disabled_after_deleting_only_job(tmp_config, tmp_data, sample_tree, dest_dir):
+    # Deleting the only (selected) job leaves an empty list with no selection,
+    # so all job-dependent buttons must be disabled.
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="copy")
+    save_jobs([job], tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        # Sanity: with a selected job the buttons are enabled.
+        assert app.screen.query_one("#delete", Button).disabled is False
+        app.screen.query_one(f"#del-{job.id}", Button).press()
+        await pilot.pause()
+        from abackup.tui.screens.main_menu import _ConfirmScreen
+
+        assert isinstance(app.screen, _ConfirmScreen)
+        await pilot.click("#yes")
+        await pilot.pause()
+        assert load_jobs(tmp_config) == []
+        # No jobs and no selection -> everything disabled (import stays enabled).
+        assert app.screen.query_one("#run", Button).disabled is True
+        assert app.screen.query_one("#history", Button).disabled is True
+        assert app.screen.query_one("#delete", Button).disabled is True
+        assert app.screen.query_one("#export", Button).disabled is True
+        assert app.screen.query_one("#import", Button).disabled is False
+
+
 async def test_main_menu_run_button(tmp_config, tmp_data, sample_tree, dest_dir):
     job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
     save_jobs([job], tmp_config)

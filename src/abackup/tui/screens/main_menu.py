@@ -125,14 +125,19 @@ class MainMenuScreen(Screen):
         self.refresh_jobs()
 
     def _update_button_states(self, jobs: list) -> None:
-        """Enable job-dependent buttons only when at least one job exists.
+        """Enable job-dependent buttons based on jobs and current selection.
 
-        Export is disabled with no jobs (nothing to export); Import stays
-        available since it bootstraps an empty config.
+        run/history/delete act on the *selected* job, so they require both
+        jobs to exist and a focused list entry. Export acts on all jobs, so it
+        only needs jobs to exist. Import stays available (bootstraps an empty
+        config).
         """
         has_jobs = bool(jobs)
-        for button_id in ("run", "history", "delete", "export"):
-            self.query_one(f"#{button_id}", Button).disabled = not has_jobs
+        list_view = self.query_one("#jobs", ListView)
+        has_selection = list_view.index is not None
+        for button_id in ("run", "history", "delete"):
+            self.query_one(f"#{button_id}", Button).disabled = not (has_jobs and has_selection)
+        self.query_one("#export", Button).disabled = not has_jobs
 
     def refresh_jobs(self) -> None:
         jobs = load_jobs(self.config_dir)
@@ -144,9 +149,17 @@ class MainMenuScreen(Screen):
                 Button("✕", id=f"del-{j.id}", variant="error", classes="job_delete"),
             )
             list_view.append(ListItem(row))
+        # Ensure a default selection when jobs exist so action buttons are
+        # enabled; with no jobs the list has no selection (buttons disabled).
+        if jobs:
+            list_view.index = 0
         status = self.query_one("#status", Static)
         status.update("No jobs yet. Add one." if not jobs else "")
         self._update_button_states(jobs)
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        # Keep action buttons in sync with the current list selection.
+        self._update_button_states(load_jobs(self.config_dir))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         jobs = load_jobs(self.config_dir)
@@ -199,7 +212,10 @@ class MainMenuScreen(Screen):
         if not jobs:
             self.query_one("#status", Static).update("No jobs to act on.")
             return
-        index = list_view.index or 0
+        if list_view.index is None:
+            self.query_one("#status", Static).update("Select a job first.")
+            return
+        index = list_view.index
         if index >= len(jobs):
             index = len(jobs) - 1
         job = jobs[index]
