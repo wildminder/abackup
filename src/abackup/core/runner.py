@@ -12,6 +12,7 @@ from pathlib import Path
 from abackup.config import load_jobs, load_settings, save_jobs
 from abackup.core.backup import BackupResult, run_job
 from abackup.core.jobs import upsert_job
+from abackup.core.notify import beep, notify
 from abackup.core.progress import PHASE_CANCELLED, STATUS_CANCELLED, Progress
 from abackup.models import BackupJob
 
@@ -44,6 +45,8 @@ def run_jobs_batch(
     cancel: threading.Event | None = None,
     run_mode: str | None = None,
     dry_run: bool = False,
+    notify_on_finish: bool = False,
+    sound_on_failure: bool = False,
 ) -> list[BackupResult]:
     """Run every job using a bounded worker-thread pool + queue (or sequentially).
 
@@ -119,52 +122,64 @@ def run_jobs_batch(
             _persist(result)
             if on_job_done is not None:
                 on_job_done(job.id, result)
-        return [results[jid] for jid in order]
+    else:
+        # Parallel mode: bounded worker pool + queue.
+        q: queue.Queue[BackupJob | None] = queue.Queue()
+        for job in jobs:
+            q.put(job)
 
-    # Parallel mode: bounded worker pool + queue.
-    q: queue.Queue[BackupJob | None] = queue.Queue()
-    for job in jobs:
-        q.put(job)
+        lock = threading.Lock()
 
-    lock = threading.Lock()
+        def worker() -> None:
+            while True:
+                try:
+                    job = q.get_nowait()
+                except queue.Empty:
+                    return
+                # A job that hasn't started yet should not run once cancellation
+                # has been requested.
+                if cancel is not None and cancel.is_set():
+                    results[job.id] = _cancelled_result(job, clock)
+                    if on_job_done is not None:
+                        on_job_done(job.id, results[job.id])
+                    if on_progress is not None:
+                        on_progress(
+                            job.id,
+                            Progress(
+                                job_id=job.id,
+                                phase=PHASE_CANCELLED,
+                                status=STATUS_CANCELLED,
+                            ),
+                        )
+                    q.task_done()
+                    continue
+                try:
+                    result = _run_one(job)
+                    _persist(result)
+                    results[job.id] = result
+                    if on_job_done is not None:
+                        on_job_done(job.id, result)
+                finally:
+                    q.task_done()
 
-    def worker() -> None:
-        while True:
-            try:
-                job = q.get_nowait()
-            except queue.Empty:
-                return
-            # A job that hasn't started yet should not run once cancellation
-            # has been requested.
-            if cancel is not None and cancel.is_set():
-                results[job.id] = _cancelled_result(job, clock)
-                if on_job_done is not None:
-                    on_job_done(job.id, results[job.id])
-                if on_progress is not None:
-                    on_progress(
-                        job.id,
-                        Progress(
-                            job_id=job.id,
-                            phase=PHASE_CANCELLED,
-                            status=STATUS_CANCELLED,
-                        ),
-                    )
-                q.task_done()
-                continue
-            try:
-                result = _run_one(job)
-                _persist(result)
-                results[job.id] = result
-                if on_job_done is not None:
-                    on_job_done(job.id, result)
-            finally:
-                q.task_done()
+        n_workers = max(1, min(max_workers, len(jobs)))
+        threads = [threading.Thread(target=worker, name=f"backup-worker-{i}", daemon=True) for i in range(n_workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
-    n_workers = max(1, min(max_workers, len(jobs)))
-    threads = [threading.Thread(target=worker, name=f"backup-worker-{i}", daemon=True) for i in range(n_workers)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    return [results[jid] for jid in order]
+    # RM-08 / RM-09: notify on completion, beep on any failure (best-effort).
+    ordered = [results[jid] for jid in order]
+    if not dry_run:
+        failed = sum(1 for r in ordered if r.status == "failed")
+        if failed > 0 and sound_on_failure:
+            beep()
+        if notify_on_finish:
+            success = sum(1 for r in ordered if r.status == "success")
+            cancelled = sum(1 for r in ordered if r.status == "cancelled")
+            notify(
+                "abackup",
+                f"Completed {len(ordered)} jobs: {success} success, {failed} failed, {cancelled} cancelled.",
+            )
+    return ordered

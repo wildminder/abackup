@@ -98,6 +98,8 @@ def main(argv=None) -> None:
             seven_zip_compression_level=settings.seven_zip_compression_level,
             run_mode=settings.run_mode,
             dry_run=args.dry_run,
+            notify_on_finish=settings.notify_on_finish,
+            sound_on_failure=settings.sound_on_failure,
         )
         _print_batch_summary(results)
         return

@@ -89,3 +89,39 @@ def validate_add_job(
         free_mb = free / (1024 * 1024)
         errors.append(f"Not enough free space on destination: need ~{needed_mb:.1f} MB, have ~{free_mb:.1f} MB.")
     return errors
+
+
+def check_free_space(
+    job,
+    *,
+    margin: float = 0.1,
+    disk_free=None,
+    clock=None,
+) -> str | None:
+    """Advisory free-space check for a job, returning a warning or ``None``.
+
+    Used at run time (RM-11) to warn before a backup that may fill the disk.
+    Unlike ``validate_add_job`` this never blocks: it returns a human-readable
+    warning string when the estimated source size exceeds the destination
+    volume's free space (with ``margin``), and ``None`` otherwise. The effective
+    destination (including a stamped subfolder) is resolved so the correct
+    volume is checked. ``disk_free``/``clock`` are injectable for tests.
+    """
+    from abackup.core.paths import resolve_destination
+
+    needed = estimate_source_bytes(job.source)
+    if needed == 0:
+        return None
+    dest = resolve_destination(job, clock=clock, stamp=job.subfolder_stamp)
+    dst = Path(dest)
+    volume = dst if dst.exists() else dst.parent
+    free_fn = disk_free or shutil.disk_usage
+    try:
+        free = free_fn(volume).free
+    except OSError:
+        return None
+    if needed > free * (1 - margin):
+        needed_mb = needed / (1024 * 1024)
+        free_mb = free / (1024 * 1024)
+        return f"Low free space on destination: need ~{needed_mb:.1f} MB, have ~{free_mb:.1f} MB."
+    return None

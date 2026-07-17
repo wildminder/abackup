@@ -358,6 +358,77 @@ def test_cancel_after_first_job_cancels_the_rest(sample_tree, tmp_path, tmp_conf
     assert by_id[jobs[1].id].status == "cancelled"
     assert by_id[jobs[2].id].status == "cancelled"
     assert (tmp_path / "d0").exists()
+
+
+def test_notify_on_finish_triggers_when_enabled(sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch):
+    import abackup.core.runner as runner_mod
+
+    calls = []
+    monkeypatch.setattr(runner_mod, "notify", lambda t, m: calls.append((t, m)))
+    monkeypatch.setattr(runner_mod, "beep", lambda: calls.append(("beep",)))
+    jobs = [_make_job(0, sample_tree, tmp_path / "d0")]
+    run_jobs_batch(
+        jobs,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        max_workers=1,
+        notify_on_finish=True,
+    )
+    assert any(c[0] == "abackup" for c in calls)
+    # No failure -> no beep.
+    assert ("beep",) not in calls
+
+
+def test_beep_on_failure_triggers_when_enabled(tmp_path, tmp_config, tmp_data, monkeypatch):
+    import abackup.core.runner as runner_mod
+
+    calls = []
+    monkeypatch.setattr(runner_mod, "notify", lambda t, m: calls.append((t, m)))
+    monkeypatch.setattr(runner_mod, "beep", lambda: calls.append(("beep",)))
+    bad = BackupJob(
+        source=str(tmp_path / "missing"),
+        destination=str(tmp_path / "d2" / "out"),
+        method="copy",
+        name="bad",
+    )
+    run_jobs_batch(
+        [bad],
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        max_workers=1,
+        sound_on_failure=True,
+    )
+    assert ("beep",) in calls
+
+
+def test_no_notify_when_disabled(sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch):
+    import abackup.core.runner as runner_mod
+
+    calls = []
+    monkeypatch.setattr(runner_mod, "notify", lambda t, m: calls.append((t, m)))
+    monkeypatch.setattr(runner_mod, "beep", lambda: calls.append(("beep",)))
+    jobs = [_make_job(0, sample_tree, tmp_path / "d0")]
+    run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=1)
+    assert calls == []
+
+
+def test_dry_run_suppresses_notify_and_beep(sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch):
+    import abackup.core.runner as runner_mod
+
+    calls = []
+    monkeypatch.setattr(runner_mod, "notify", lambda t, m: calls.append((t, m)))
+    monkeypatch.setattr(runner_mod, "beep", lambda: calls.append(("beep",)))
+    jobs = [_make_job(0, sample_tree, tmp_path / "d0")]
+    run_jobs_batch(
+        jobs,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        max_workers=1,
+        dry_run=True,
+        notify_on_finish=True,
+        sound_on_failure=True,
+    )
+    assert calls == []
     assert not (tmp_path / "d1").exists()
 
 

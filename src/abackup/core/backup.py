@@ -11,7 +11,8 @@ from pathlib import Path
 from abackup.config import _atomic_write
 from abackup.core.compression import make_archive, make_zip
 from abackup.core.copy import copy_tree
-from abackup.core.paths import ensure_dir, get_data_dir
+from abackup.core.history import RunHistoryEntry, _make_run_id, append_run
+from abackup.core.paths import ensure_dir, get_data_dir, resolve_destination
 from abackup.core.progress import (
     PHASE_CANCELLED,
     PHASE_DONE,
@@ -41,6 +42,32 @@ class BackupResult:
     manifest_path: str | None = None
     error: str | None = None
     updated_job: BackupJob | None = None
+
+
+def format_summary(summary: dict) -> str:
+    """Render a ``BackupResult.summary`` dict as a friendly one-line string.
+
+    Used by the TUI so users see e.g. ``archive: D:/Backups/job.7z`` instead of
+    the raw Python dict repr.
+    """
+    if not summary:
+        return ""
+    parts = []
+    if "archive" in summary:
+        parts.append(f"archive: {summary['archive']}")
+    if "files" in summary:
+        parts.append(f"files: {summary['files']}")
+    if "bytes" in summary:
+        mb = summary["bytes"] / (1024 * 1024)
+        parts.append(f"{mb:.1f} MB")
+    if "failed_files" in summary and summary["failed_files"]:
+        parts.append(f"failed: {len(summary['failed_files'])}")
+    if "archives_deleted" in summary:
+        parts.append(f"deleted: {summary['archives_deleted']}")
+    if not parts:
+        # Fall back to a compact key=value rendering for unknown keys.
+        parts.append(", ".join(f"{k}: {v}" for k, v in summary.items()))
+    return " · ".join(parts)
 
 
 def run_job(
@@ -76,6 +103,7 @@ def run_job(
     ensure_dir(Path(data_dir) / "manifests")
     ensure_dir(Path(data_dir) / "logs")
     logger = RunLogger(data_dir, job.id)
+    started_at = clock()
 
     # Forward progress to the caller while remembering the latest snapshot so we
     # can emit a terminal status (success/failed/cancelled) with accurate totals.
@@ -103,11 +131,46 @@ def run_job(
             )
         )
 
+    def _record_history(status: str, summary: dict, error: str | None, archive_out=None) -> None:
+        """Append a RunHistoryEntry for this execution (RM-06)."""
+        finished_at = clock()
+        prev = last.get("p")
+        archive_size = None
+        if archive_out is not None and not dry_run:
+            try:
+                archive_size = Path(archive_out).stat().st_size
+            except OSError:
+                archive_size = None
+        entry = RunHistoryEntry(
+            job_id=job.id,
+            run_id=_make_run_id(job.id, started_at.isoformat()),
+            started_at=started_at.isoformat(),
+            finished_at=finished_at.isoformat(),
+            duration_seconds=(finished_at - started_at).total_seconds(),
+            files_total=prev.files_total if prev else 0,
+            files_done=prev.files_done if prev else 0,
+            bytes_total=prev.bytes_total if prev else 0,
+            bytes_done=prev.bytes_done if prev else 0,
+            archive_size=archive_size,
+            status=status,
+            method=job.method.value,
+            error=error,
+            summary=summary,
+        )
+        try:
+            append_run(data_dir, entry)
+        except OSError:
+            # History is best-effort; never fail a backup because of it.
+            pass
+
+    # RM-10: optionally write each run into its own timestamped subfolder.
+    dest = resolve_destination(job, clock=clock, stamp=job.subfolder_stamp)
+
     try:
         if job.method == BackupMethod.ZIP:
             out = make_zip(
                 job.source,
-                job.destination,
+                dest,
                 compress_level=zip_compression_level,
                 cancel=cancel,
                 job_id=job.id,
@@ -120,7 +183,7 @@ def run_job(
         elif job.method == BackupMethod.SEVEN_ZIP:
             out = make_archive(
                 job.source,
-                job.destination,
+                dest,
                 compress_level=seven_zip_compression_level,
                 prefer_py7zr=prefer_py7zr,
                 cancel=cancel,
@@ -135,7 +198,7 @@ def run_job(
         else:
             summary = copy_tree(
                 job.source,
-                job.destination,
+                dest,
                 job_id=job.id,
                 on_progress=_forward,
                 use_hash=use_hash,
@@ -147,26 +210,33 @@ def run_job(
         status = "success"
     except JobCancelled:
         _terminal(PHASE_CANCELLED, STATUS_CANCELLED)
+        _record_history("cancelled", {}, "cancelled")
         updated = BackupJob(**{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "cancelled"})
         return BackupResult(job.id, job.method.value, "cancelled", {}, None, "cancelled", updated)
     except (SourceNotFound, DestinationError) as exc:
         logger.log("error", {"job_id": job.id, "error": str(exc)})
         _terminal(PHASE_FAILED, STATUS_FAILED)
+        _record_history("failed", {}, str(exc))
         updated = BackupJob(**{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "failed"})
         return BackupResult(job.id, job.method.value, "failed", {}, None, str(exc), updated)
 
     if dry_run:
         # No writes, no manifest, no retention. Report the plan.
         _terminal(PHASE_DONE, STATUS_SUCCESS)
+        _record_history("success", summary, None)
         updated = BackupJob(**{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "success"})
         return BackupResult(job.id, job.method.value, "success", summary, None, None, updated)
 
     _terminal(PHASE_DONE, STATUS_SUCCESS)
 
+    # For archive methods `out` is a path; for copy it is the summary dict.
+    archive_out = out if job.method != BackupMethod.COPY else None
+    _record_history("success", summary, None, archive_out)
+
     manifest = {
         "job_id": job.id,
         "source": job.source,
-        "destination": job.destination,
+        "destination": dest,
         "method": job.method.value,
         "started_at": clock().isoformat(),
         "status": status,

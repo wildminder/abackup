@@ -1,4 +1,15 @@
-from textual.widgets import Button, Checkbox, Input, Label, ListView, ProgressBar, RadioButton, Select, Static
+from textual.widgets import (
+    Button,
+    Checkbox,
+    DataTable,
+    Input,
+    Label,
+    ListView,
+    ProgressBar,
+    RadioButton,
+    Select,
+    Static,
+)
 
 from abackup.cli import ABackupApp, main
 from abackup.config import load_jobs, load_settings, save_jobs, save_settings
@@ -83,6 +94,27 @@ async def test_add_job_wizard_cancel_returns_to_main_menu(tmp_config, tmp_data):
         assert load_jobs(tmp_config) == []
 
 
+async def test_add_job_subfolder_stamp_toggles_persist(tmp_config, tmp_data, sample_tree, dest_dir):
+    """RM-10: the subfolder-stamp checkbox is saved onto the job."""
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        await pilot.click("#add")
+        await pilot.pause()
+        assert isinstance(app.screen, AddJobScreen)
+
+        app.screen.query_one("#source", Input).value = str(sample_tree)
+        app.screen.query_one("#dest", Input).value = str(dest_dir)
+        app.screen.query_one("#subfolder_stamp", Checkbox).value = True
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+        assert isinstance(app.screen, MainMenuScreen)
+
+        jobs = load_jobs(tmp_config)
+        assert len(jobs) == 1
+        assert jobs[0].subfolder_stamp is True
+
+
 async def test_main_menu_shows_empty_state(tmp_config, tmp_data):
     # No jobs configured -> app still opens on the main window with an empty
     # table and a clear hint, instead of forcing a first-run wizard.
@@ -92,6 +124,25 @@ async def test_main_menu_shows_empty_state(tmp_config, tmp_data):
         status = app.screen.query_one("#status", Static)
         assert "No jobs yet" in str(status.render())
         assert len(app.screen.query_one("#jobs", ListView).children) == 0
+        # Job-dependent buttons are disabled until a job exists.
+        for bid in ("run", "history", "delete"):
+            assert app.screen.query_one(f"#{bid}", Button).disabled is True
+        # Unrelated actions remain available.
+        assert app.screen.query_one("#add", Button).disabled is False
+        assert app.screen.query_one("#run_all", Button).disabled is False
+
+
+async def test_main_menu_buttons_enabled_when_job_exists(tmp_config, tmp_data, sample_tree, dest_dir):
+    # Once a job is present, the job-dependent buttons become enabled.
+    save_jobs(
+        [BackupJob(source=str(sample_tree), destination=str(dest_dir), method="copy")],
+        tmp_config,
+    )
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test():
+        assert isinstance(app.screen, MainMenuScreen)
+        for bid in ("run", "history", "delete"):
+            assert app.screen.query_one(f"#{bid}", Button).disabled is False
 
 
 async def test_main_menu_shows_key_help(tmp_config, tmp_data):
@@ -1014,3 +1065,183 @@ async def test_run_job_screen_dry_run_shows_plan(tmp_config, tmp_data, sample_tr
     assert captured["dry_run"] is True
     # Nothing was written to the destination.
     assert not (dest_dir / "out").exists()
+
+
+async def test_settings_notify_toggles_persist(tmp_config, tmp_data):
+    """RM-08/09: the notify/beep checkboxes save into settings."""
+    save_settings(Settings(), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(app.config_dir, app.data_dir))
+        await pilot.pause()
+        app.screen.query_one("#notify_on_finish", Checkbox).value = True
+        app.screen.query_one("#sound_on_failure", Checkbox).value = True
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+    settings = load_settings(tmp_config)
+    assert settings.notify_on_finish is True
+    assert settings.sound_on_failure is True
+
+
+async def test_settings_notify_toggles_reflect_loaded(tmp_config, tmp_data):
+    """RM-08/09: loaded settings are reflected in the checkboxes on mount."""
+    save_settings(Settings(notify_on_finish=True, sound_on_failure=False), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(app.config_dir, app.data_dir))
+        await pilot.pause()
+        assert app.screen.query_one("#notify_on_finish", Checkbox).value is True
+        assert app.screen.query_one("#sound_on_failure", Checkbox).value is False
+
+
+async def test_run_job_screen_notifies_on_success_when_enabled(
+    tmp_config, tmp_data, sample_tree, dest_dir, monkeypatch
+):
+    """RM-08: a successful run triggers notify() when notify_on_finish is set."""
+    import abackup.tui.screens.run_job as rj_mod
+
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy", name="j")
+    save_jobs([job], tmp_config)
+    save_settings(Settings(notify_on_finish=True), tmp_config)
+
+    calls = []
+    monkeypatch.setattr(rj_mod, "notify", lambda t, m: calls.append((t, m)))
+    monkeypatch.setattr(rj_mod, "beep", lambda: calls.append(("beep",)))
+
+    def fake_run_job(j, **kwargs):
+        from abackup.core.backup import BackupResult
+
+        return BackupResult(j.id, j.method.value, "success", {"files_total": 1}, None, None, j)
+
+    monkeypatch.setattr(rj_mod, "run_job", fake_run_job)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(RunJobScreen(app.config_dir, app.data_dir, job))
+        await pilot.pause()
+        await pilot.pause()
+    assert any(c[0] == "abackup" for c in calls)
+    assert ("beep",) not in calls
+
+
+async def test_run_job_screen_beeps_on_failure_when_enabled(
+    tmp_config, tmp_data, sample_tree, dest_dir, monkeypatch
+):
+    """RM-09: a failed run triggers beep() when sound_on_failure is set."""
+    import abackup.tui.screens.run_job as rj_mod
+
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy", name="j")
+    save_jobs([job], tmp_config)
+    save_settings(Settings(sound_on_failure=True), tmp_config)
+
+    calls = []
+    monkeypatch.setattr(rj_mod, "notify", lambda t, m: calls.append((t, m)))
+    monkeypatch.setattr(rj_mod, "beep", lambda: calls.append(("beep",)))
+
+    def fake_run_job(j, **kwargs):
+        from abackup.core.backup import BackupResult
+
+        return BackupResult(j.id, j.method.value, "failed", {"files_total": 1}, None, "boom", j)
+
+    monkeypatch.setattr(rj_mod, "run_job", fake_run_job)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(RunJobScreen(app.config_dir, app.data_dir, job))
+        await pilot.pause()
+        await pilot.pause()
+    assert ("beep",) in calls
+
+
+async def test_run_all_screen_beeps_on_failure_when_enabled(
+    tmp_config, tmp_data, sample_tree, dest_dir, monkeypatch
+):
+    """RM-09: RunAllScreen beeps if any job fails and sound_on_failure is set."""
+    import abackup.tui.screens.run_all as ra_mod
+
+    good = BackupJob(source=str(sample_tree), destination=str(dest_dir / "ok"), method="copy", name="g")
+    bad = BackupJob(source=str(dest_dir / "missing"), destination=str(dest_dir / "bad"), method="copy", name="b")
+    save_jobs([good, bad], tmp_config)
+    save_settings(Settings(sound_on_failure=True), tmp_config)
+
+    calls = []
+    monkeypatch.setattr(ra_mod, "beep", lambda: calls.append(("beep",)))
+    monkeypatch.setattr(ra_mod, "notify", lambda t, m: calls.append((t, m)))
+
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(RunAllScreen(app.config_dir, app.data_dir))
+        # Wait for the batch to finish.
+        for _ in range(50):
+            await pilot.pause()
+            if app.screen._completed:
+                break
+    assert ("beep",) in calls
+
+
+async def test_history_screen_shows_runs(tmp_config, tmp_data, sample_tree, dest_dir):
+    """RM-06: HistoryScreen lists past runs for a job."""
+    from abackup.core.backup import run_job
+    from abackup.core.history import RunHistoryEntry, append_run
+    from abackup.tui.screens.history import HistoryScreen
+    from abackup.tui.screens.main_menu import MainMenuScreen
+
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
+    run_job(job, config_dir=tmp_config, data_dir=tmp_data)
+    # Seed an extra history line directly.
+    append_run(
+        tmp_data,
+        RunHistoryEntry(
+            job_id=job.id,
+            run_id="r2",
+            started_at="2026-01-01T00:00:00+00:00",
+            finished_at="2026-01-01T00:01:00+00:00",
+            duration_seconds=60.0,
+            files_total=1,
+            files_done=1,
+            bytes_total=10,
+            bytes_done=10,
+            archive_size=None,
+            status="success",
+            method="copy",
+        ),
+    )
+
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(HistoryScreen(tmp_config, tmp_data, job))
+        await pilot.pause()
+        table = app.screen.query_one("#table", DataTable)
+        # Two runs (one from run_job, one seeded) -> 2 rows.
+        assert table.row_count == 2
+        # Back returns to the main menu.
+        app.screen.query_one("#back", Button).press()
+        await pilot.pause()
+        assert isinstance(app.screen, MainMenuScreen)
+
+
+async def test_history_screen_empty_state(tmp_config, tmp_data):
+    """RM-06: empty history shows a message and hides the table."""
+    from abackup.tui.screens.history import HistoryScreen
+
+    job = BackupJob(source="C:/x", destination="D:/y", method="copy", name="demo")
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(HistoryScreen(tmp_config, tmp_data, job))
+        await pilot.pause()
+        assert "No runs yet" in str(app.screen.query_one("#empty", Static).render())
+        assert app.screen.query_one("#table", DataTable).display is False
+
+
+async def test_main_menu_history_button_opens_screen(tmp_config, tmp_data, sample_tree, dest_dir):
+    """RM-06: the History button opens HistoryScreen for the selected job."""
+    from abackup.tui.screens.history import HistoryScreen
+
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
+    save_jobs([job], tmp_config)
+    save_settings(Settings(), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        app.screen.query_one("#history", Button).press()
+        await pilot.pause()
+        assert isinstance(app.screen, HistoryScreen)
+        assert app.screen.job.id == job.id

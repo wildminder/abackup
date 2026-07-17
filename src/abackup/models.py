@@ -44,6 +44,8 @@ class Settings:
     theme: str = "dark"
     run_mode: str = "parallel"
     run_on_startup: bool = False
+    notify_on_finish: bool = False
+    sound_on_failure: bool = False
     created_at: str = field(default_factory=lambda: _now().isoformat())
 
     def to_dict(self) -> dict[str, Any]:
@@ -90,6 +92,7 @@ class BackupJob:
     include_patterns: list[str] = field(default_factory=list)
     retention_count: int | None = None
     tag: str | None = None
+    subfolder_stamp: bool = False
 
     def __post_init__(self) -> None:
         if isinstance(self.method, str):

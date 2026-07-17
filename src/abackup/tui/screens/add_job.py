@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Input, Label, RadioButton, RadioSet, Static
+from textual.widgets import Button, Checkbox, Input, Label, RadioButton, RadioSet, Static
 
 from abackup.config import load_jobs, save_jobs
 from abackup.core.validation import validate_add_job
@@ -18,9 +18,9 @@ class AddJobScreen(Screen):
         self.data_dir = data_dir
 
     def compose(self):
+        yield Label("Add backup job", id="title")
         yield ScrollableContainer(
             Vertical(
-                Label("Add backup job", id="title"),
                 Label("Source folder (to back up):"),
                 Input(placeholder="C:/Users/art/Documents", id="source"),
                 Label("Destination folder:"),
@@ -40,13 +40,44 @@ class AddJobScreen(Screen):
                 Input(placeholder="optional", id="retention"),
                 Label("Tag / group (optional):"),
                 Input(placeholder="optional", id="tag"),
+                Label("Write each run into its own timestamped subfolder:"),
+                Checkbox("Stamp destination with run timestamp", id="subfolder_stamp"),
                 Static("", id="error"),
-                Horizontal(
-                    Button("Save", id="save", variant="primary"),
-                    Button("Cancel", id="cancel"),
-                ),
-            )
+            ),
+            id="form",
         )
+        yield Horizontal(
+            Button("Save", id="save", variant="primary"),
+            Button("Cancel", id="cancel"),
+            id="actions",
+        )
+
+    CSS = """
+    #title {
+        text-style: bold;
+        width: 100%;
+        content-align: center middle;
+        padding-bottom: 1;
+    }
+    #form {
+        height: 1fr;
+        width: 100%;
+        overflow-y: auto;
+        border: round $primary;
+        padding: 1 2;
+    }
+    #form > Vertical {
+        height: auto;
+    }
+    #form Input { width: 100%; }
+    #form RadioSet { width: 100%; }
+    #actions {
+        width: 100%;
+        height: auto;
+        align: center bottom;
+        padding-top: 1;
+    }
+    """
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
@@ -85,6 +116,7 @@ class AddJobScreen(Screen):
                 err.update("Retention must be a number")
                 return
         tag = tag_raw or None
+        subfolder_stamp = self.query_one("#subfolder_stamp", Checkbox).value
 
         job = BackupJob(
             source=source,
@@ -94,6 +126,7 @@ class AddJobScreen(Screen):
             include_patterns=include_patterns,
             retention_count=retention_count,
             tag=tag,
+            subfolder_stamp=subfolder_stamp,
         )
         try:
             job.validate()

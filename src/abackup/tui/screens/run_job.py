@@ -6,9 +6,11 @@ from textual.screen import Screen
 from textual.widgets import Button, ProgressBar, Static
 
 from abackup.config import load_jobs, load_settings, save_jobs
-from abackup.core.backup import run_job
+from abackup.core.backup import format_summary, run_job
+from abackup.core.notify import beep, notify
 from abackup.core.paths import shorten_path
 from abackup.core.progress import Progress
+from abackup.core.validation import check_free_space
 from abackup.models import BackupJob
 
 
@@ -28,6 +30,7 @@ class RunJobScreen(Screen):
         yield ProgressBar(total=100, id="progress")
         yield Static("", id="current")
         yield Static("", id="counts")
+        yield Static("", id="warning")
         yield Static("", id="result")
         yield Button("Back", id="back")
 
@@ -47,6 +50,10 @@ class RunJobScreen(Screen):
             )
 
         settings = load_settings(self.config_dir)
+        # RM-11: advisory low-free-space warning before the run starts.
+        warning = check_free_space(self.job)
+        if warning:
+            self.query_one("#warning", Static).update(f"⚠ {warning}")
         result = run_job(
             self.job,
             config_dir=self.config_dir,
@@ -58,7 +65,15 @@ class RunJobScreen(Screen):
         )
         self.query_one("#progress", ProgressBar).update(progress=100)
         suffix = " (dry run — nothing written)" if self.dry_run else ""
-        self.query_one("#result", Static).update(f"Status: {result.status}\n{result.summary}{suffix}")
+        summary_text = format_summary(result.summary)
+        detail = f"\n{summary_text}" if summary_text else ""
+        self.query_one("#result", Static).update(f"Status: {result.status}{detail}{suffix}")
+        # RM-08 / RM-09: notify on success, beep on failure (best-effort, toggled).
+        if not self.dry_run:
+            if result.status == "success" and settings.notify_on_finish:
+                notify("abackup", f"Backup '{self.job.name}' finished successfully.")
+            elif result.status in ("failed", "cancelled") and settings.sound_on_failure:
+                beep()
         # Persist updated job status (dry-run still records last_run_at/status).
         jobs = load_jobs(self.config_dir)
         if result.updated_job is not None:
@@ -71,3 +86,21 @@ class RunJobScreen(Screen):
             from abackup.tui.screens.main_menu import MainMenuScreen
 
             self.app.push_screen(MainMenuScreen(self.config_dir, self.data_dir))
+
+    CSS = """
+    #title {
+        text-style: bold;
+        width: 100%;
+        content-align: center middle;
+        padding-bottom: 1;
+    }
+    #result {
+        width: 100%;
+        height: auto;
+        border: round $panel;
+        background: $panel;
+        padding: 1 2;
+        margin-top: 1;
+    }
+    #warning { color: $warning; }
+    """

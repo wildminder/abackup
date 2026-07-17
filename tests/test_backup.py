@@ -1,3 +1,4 @@
+import json
 import threading
 from datetime import UTC, datetime
 
@@ -455,3 +456,75 @@ def test_run_job_retention_deletes_old_archives(sample_tree, dest_dir, tmp_confi
     assert len(deleted) == 3
     # Exactly 2 archives remain.
     assert len(list(dest_dir.glob("*.zip"))) == 2
+
+
+def test_run_job_records_history_success(sample_tree, dest_dir, tmp_config, tmp_data):
+    from abackup.core.history import load_history
+
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
+    run_job(job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock)
+    entries = load_history(tmp_data, job.id)
+    assert len(entries) == 1
+    e = entries[0]
+    assert e.status == "success"
+    assert e.method == "copy"
+    assert e.duration_seconds == 0.0  # fixed clock -> zero elapsed
+    assert e.files_total > 0
+    assert e.archive_size is None  # copy has no single archive
+
+
+def test_run_job_records_history_failed(dest_dir, tmp_config, tmp_data):
+    from abackup.core.history import load_history
+
+    job = BackupJob(source=str(dest_dir / "missing"), destination=str(dest_dir), method="copy")
+    run_job(job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock)
+    entries = load_history(tmp_data, job.id)
+    assert len(entries) == 1
+    assert entries[0].status == "failed"
+    assert isinstance(entries[0].error, str)
+
+
+def test_run_job_records_history_dry_run(sample_tree, dest_dir, tmp_config, tmp_data):
+    from abackup.core.history import load_history
+
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
+    run_job(job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock, dry_run=True)
+    entries = load_history(tmp_data, job.id)
+    assert len(entries) == 1
+    assert entries[0].status == "success"
+
+
+def test_run_job_subfolder_stamp_writes_into_timestamped_dir(sample_tree, dest_dir, tmp_config, tmp_data):
+    """RM-10: with subfolder_stamp, output lands in <dest>/<YYYY-MM-DD_HHMMSS>."""
+    from pathlib import Path
+
+    job = BackupJob(
+        source=str(sample_tree),
+        destination=str(dest_dir / "out"),
+        method="copy",
+        subfolder_stamp=True,
+    )
+    result = run_job(job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock)
+    assert result.status == "success"
+    # The fixed clock -> 2026-07-12_100000 subfolder.
+    stamped = dest_dir / "out" / "2026-07-12_100000"
+    assert stamped.is_dir()
+    assert (stamped / "b.txt").read_text() == "world"
+    # Manifest records the effective (stamped) destination.
+    manifest = json.loads(Path(result.manifest_path).read_text())
+    assert manifest["destination"] == str(stamped)
+
+
+def test_format_summary_renders_friendly_string():
+    """The TUI must show a friendly summary, not the raw dict repr."""
+    from abackup.core.backup import format_summary
+
+    assert format_summary({}) == ""
+    assert format_summary({"archive": "D:/Backups/job.7z"}) == "archive: D:/Backups/job.7z"
+    out = format_summary({"files": 3, "bytes": 5 * 1024 * 1024})
+    assert "files: 3" in out
+    assert "5.0 MB" in out
+    out = format_summary({"archive": "x", "failed_files": [{"file": "a", "error": "e"}]})
+    assert "failed: 1" in out
+    # Unknown keys fall back to a compact key=value rendering.
+    assert format_summary({"custom": "v"}) == "custom: v"

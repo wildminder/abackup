@@ -156,6 +156,30 @@ class SettingsScreen(Screen):
                 ),
                 classes="field",
             ),
+            Vertical(
+                Checkbox(
+                    "Desktop notification when all jobs finish",
+                    id="notify_on_finish",
+                ),
+                Static(
+                    "Shows a system notification summarizing the run when 'Run all' "
+                    "completes (requires a notification backend; best-effort).",
+                    classes="field-hint",
+                ),
+                classes="field",
+            ),
+            Vertical(
+                Checkbox(
+                    "Sound on failure",
+                    id="sound_on_failure",
+                ),
+                Static(
+                    "Plays a short beep if a job fails or is cancelled (respects this "
+                    "toggle only; success never beeps).",
+                    classes="field-hint",
+                ),
+                classes="field",
+            ),
             Static("", id="error"),
             id="body",
         )
@@ -184,6 +208,8 @@ class SettingsScreen(Screen):
         self.query_one("#run_mode", Select).value = self._existing.run_mode
         self.query_one("#prefer_py7zr", Checkbox).value = self._existing.prefer_py7zr
         self.query_one("#run_on_startup", Checkbox).value = self._existing.run_on_startup
+        self.query_one("#notify_on_finish", Checkbox).value = self._existing.notify_on_finish
+        self.query_one("#sound_on_failure", Checkbox).value = self._existing.sound_on_failure
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
@@ -205,6 +231,8 @@ class SettingsScreen(Screen):
             run_mode = self.query_one("#run_mode", Select).value
             prefer_py7zr = self.query_one("#prefer_py7zr", Checkbox).value
             run_on_startup = self.query_one("#run_on_startup", Checkbox).value
+            notify_on_finish = self.query_one("#notify_on_finish", Checkbox).value
+            sound_on_failure = self.query_one("#sound_on_failure", Checkbox).value
         except ValueError as exc:
             error.update(f"Invalid number: {exc}")
             return
@@ -220,6 +248,8 @@ class SettingsScreen(Screen):
             theme=theme,
             run_mode=run_mode,
             run_on_startup=run_on_startup,
+            notify_on_finish=notify_on_finish,
+            sound_on_failure=sound_on_failure,
             created_at=self._existing.created_at,
         )
         try:

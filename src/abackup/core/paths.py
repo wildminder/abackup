@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 import sys
-from datetime import date
+from collections.abc import Callable
+from datetime import date, datetime
 from pathlib import Path
 
 import platformdirs
@@ -219,3 +220,25 @@ def format_job_label(
     src = shorten_display_path(source, max_len)
     dst = shorten_display_path(destination, max_len)
     return f"{name} [{method}]: {src} -> {dst}"
+
+
+def resolve_destination(
+    job,
+    *,
+    clock: Callable[[], datetime] | None = None,
+    stamp: bool = False,
+) -> str:
+    """Resolve the effective destination directory for a job.
+
+    When ``stamp`` is True (or ``job.subfolder_stamp`` is set), a timestamped
+    subfolder ``<destination>/<YYYY-MM-DD_HHMMSS>`` is appended so each run lands
+    in its own folder (RM-10). Otherwise the job's ``destination`` is returned
+    unchanged. ``clock`` is injectable for deterministic tests.
+    """
+    if not stamp and not getattr(job, "subfolder_stamp", False):
+        return job.destination
+    clock = clock or datetime.now
+    when = clock()
+    # Use a filesystem-safe timestamp (no colons) for the subfolder name.
+    stamp_str = when.strftime("%Y-%m-%d_%H%M%S")
+    return str(Path(job.destination) / stamp_str)

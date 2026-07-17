@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from abackup.core.paths import (
@@ -8,12 +8,14 @@ from abackup.core.paths import (
     get_config_dir,
     get_data_dir,
     jobs_file_path,
+    resolve_destination,
     safe_archive_name,
     settings_file_path,
     shorten_display_path,
     shorten_path,
     unique_archive_name,
 )
+from abackup.models import BackupJob
 
 
 def test_override_dirs():
@@ -218,3 +220,40 @@ def test_format_job_label_elides_long_paths():
     src_part, dst_part = label.split("->", 1)
     assert len(src_part) <= len("Docs [copy]: ") + 40
     assert len(dst_part.strip()) <= 40
+
+
+def _job(destination, subfolder_stamp=False):
+    return BackupJob(
+        source="C:/src",
+        destination=destination,
+        method="copy",
+        subfolder_stamp=subfolder_stamp,
+    )
+
+
+def test_resolve_destination_passthrough_without_stamp():
+    job = _job("D:/Backups")
+    assert resolve_destination(job) == "D:/Backups"
+
+
+def test_resolve_destination_stamp_appends_timestamp():
+    job = _job("D:/Backups", subfolder_stamp=True)
+    fixed = datetime(2026, 1, 2, 3, 4, 5)
+
+    def clock():
+        return fixed
+
+    out = resolve_destination(job, clock=clock)
+    assert out == str(Path("D:/Backups") / "2026-01-02_030405")
+
+
+def test_resolve_destination_explicit_stamp_flag():
+    # The explicit `stamp=True` flag overrides a job that has it disabled.
+    job = _job("D:/Backups", subfolder_stamp=False)
+    fixed = datetime(2026, 5, 6, 7, 8, 9)
+
+    def clock():
+        return fixed
+
+    out = resolve_destination(job, clock=clock, stamp=True)
+    assert out == str(Path("D:/Backups") / "2026-05-06_070809")

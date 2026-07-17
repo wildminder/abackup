@@ -10,9 +10,11 @@ from textual.widgets import Button, ProgressBar, RichLog, Static
 
 from abackup.config import load_jobs, load_settings
 from abackup.core.jobs import filter_by_tag
+from abackup.core.notify import beep, notify
 from abackup.core.paths import shorten_path
 from abackup.core.progress import Progress
 from abackup.core.runner import run_jobs_batch
+from abackup.core.validation import check_free_space
 
 
 class RunAllScreen(Screen):
@@ -58,6 +60,7 @@ class RunAllScreen(Screen):
         yield ProgressBar(total=100, id="progress")
         yield Static("", id="jobs")
         yield RichLog(id="log")
+        yield Static("", id="warning")
         yield Static("", id="summary")
         yield Horizontal(
             Button("Cancel", id="cancel", variant="error"),
@@ -82,6 +85,11 @@ class RunAllScreen(Screen):
 
         self._job_names = {j.id: j.name for j in jobs}
         self._job_sources = {j.id: j.source for j in jobs}
+
+        # RM-11: advisory low-free-space warnings (non-blocking) before the run.
+        warnings = [w for j in jobs if (w := check_free_space(j))]
+        if warnings:
+            self.query_one("#warning", Static).update("⚠ " + "  ".join(warnings))
 
         # Keep "Back" disabled until the batch finishes (or is cancelled) so the
         # screen isn't popped while worker threads are still running.
@@ -119,6 +127,7 @@ class RunAllScreen(Screen):
                 self._finish,
                 f"Completed {len(results)} jobs: {success} success, {failed} failed, {cancelled} cancelled."
                 + (" (dry run)" if self.dry_run else ""),
+                settings,
             )
 
         self._worker = self.run_worker(run_batch, thread=True)
@@ -144,11 +153,17 @@ class RunAllScreen(Screen):
     def _log(self, text: str) -> None:
         self.query_one("#log", RichLog).write(text)
 
-    def _finish(self, text: str) -> None:
+    def _finish(self, text: str, settings=None) -> None:
         self.query_one("#summary", Static).update(text)
         self._completed = True
         self.query_one("#back", Button).disabled = False
         self.query_one("#cancel", Button).disabled = True
+        # RM-08 / RM-09: notify on completion, beep on any failure (best-effort).
+        if not self.dry_run and settings is not None:
+            if "failed" in text and settings.sound_on_failure:
+                beep()
+            if settings.notify_on_finish:
+                notify("abackup", text)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":

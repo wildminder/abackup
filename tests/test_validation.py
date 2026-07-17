@@ -1,7 +1,8 @@
 import types
 
 from abackup.core.paths import is_inside
-from abackup.core.validation import estimate_source_bytes, validate_add_job
+from abackup.core.validation import check_free_space, estimate_source_bytes, validate_add_job
+from abackup.models import BackupJob
 
 
 def test_is_inside_equal(tmp_path):
@@ -113,3 +114,45 @@ def test_estimate_source_bytes(tmp_path):
     (src / "a" / "x.bin").write_bytes(b"x" * 100)
     (src / "y.bin").write_bytes(b"y" * 50)
     assert estimate_source_bytes(src) == 150
+
+
+def test_check_free_space_returns_none_when_plenty(tmp_path, monkeypatch):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "f.txt").write_text("hello")
+    dest = tmp_path / "dest"
+    monkeypatch.setattr(
+        "abackup.core.validation.shutil.disk_usage",
+        lambda p: types.SimpleNamespace(free=10**12),
+    )
+    job = BackupJob(source=str(src), destination=str(dest), method="copy")
+    assert check_free_space(job) is None
+
+
+def test_check_free_space_warns_when_low(tmp_path, monkeypatch):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "big.bin").write_bytes(b"x" * 10_000_000)
+    dest = tmp_path / "dest"
+    monkeypatch.setattr(
+        "abackup.core.validation.shutil.disk_usage",
+        lambda p: types.SimpleNamespace(free=100),
+    )
+    job = BackupJob(source=str(src), destination=str(dest), method="copy")
+    warning = check_free_space(job)
+    assert warning is not None
+    assert "Low free space" in warning
+
+
+def test_check_free_space_empty_source_returns_none(tmp_path, monkeypatch):
+    src = tmp_path / "src"
+    src.mkdir()
+    dest = tmp_path / "dest"
+    monkeypatch.setattr(
+        "abackup.core.validation.shutil.disk_usage",
+        lambda p: types.SimpleNamespace(free=100),
+    )
+    job = BackupJob(source=str(src), destination=str(dest), method="copy")
+    # No files -> nothing to warn about.
+    assert check_free_space(job) is None
+

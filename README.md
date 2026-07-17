@@ -128,6 +128,9 @@ Open the **Settings** screen from the main menu to tune global options:
 - **Max workers** — default number of concurrent jobs for *Run all jobs*.
 - **Default destination** — pre-filled destination for new jobs.
 - **Log level** — `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
+- **Notify on finish** — show a desktop notification when a batch of jobs
+  completes (uses `plyer` when available, otherwise a best-effort OS call).
+- **Sound on failure** — play a short system beep if any job in a run fails.
 
 You can also inspect the resolved config directory and current settings non-interactively:
 
@@ -135,6 +138,20 @@ You can also inspect the resolved config directory and current settings non-inte
 python -m abackup --show-settings
 # => {"config_dir": "...", "zip_compression_level": 6, "seven_zip_compression_level": 3, "max_workers": 4, ...}
 ```
+
+### Run history & safety
+
+- **Per-job run history** — every run records timestamp, duration, file count,
+  size, and success/failure. Open the **History** screen from the main menu to
+  browse past runs for a job.
+- **Persistent log file** — a human-readable append-only log is written next to
+  the config so failures can be diagnosed outside the TUI.
+- **Subfolder stamping** — enable *Subfolder stamping* on a job to write each
+  backup into `destination/<YYYY-MM-DD_HHMMSS>/` so multiple runs coexist without
+  overwriting each other.
+- **Free-space check** — before a run starts, ABackup estimates the source tree
+  size and shows a warning if the destination has insufficient free space (it
+  never blocks the run).
 
 ## Storage
 
@@ -145,6 +162,8 @@ python -m abackup --show-settings
 - **Settings:** `<config>/settings.json` (global defaults).
 - **Jobs:** `<config>/jobs.json` (array of backup jobs).
 - **Run logs:** `<data>/logs/<job_id>.jsonl`.
+- **Shared log:** `<data>/logs/abackup.log` (all runs aggregated; the only log file at the data root is under `logs/`).
+- **Run history:** `<data>/history/<job_id>.jsonl` (append-only per-job history).
 - **Manifests:** `<data>/manifests/<job_id>.json`.
 
 All writes are atomic (temp file + `os.replace`).

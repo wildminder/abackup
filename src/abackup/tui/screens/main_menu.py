@@ -42,19 +42,28 @@ class MainMenuScreen(Screen):
             Button("Add job", id="add", variant="primary"),
             Button("Run selected", id="run"),
             Button("Run all", id="run_all", variant="success"),
+            Button("History", id="history"),
+        )
+        yield Horizontal(
             Button("Delete selected", id="delete", variant="error"),
             Button("Settings", id="settings"),
             Button("Quit", id="quit"),
         )
         yield Static("", id="status")
         yield Static(
-            "↑/↓ select · Enter run · A add · D delete · R run all · S settings",
+            "↑/↓ select · Enter run · A add · D delete · H history · R run all · S settings",
             id="key_help",
         )
         yield Footer()
 
     def on_mount(self) -> None:
         self.refresh_jobs()
+
+    def _update_button_states(self, jobs: list) -> None:
+        """Enable job-dependent buttons only when at least one job exists."""
+        has_jobs = bool(jobs)
+        for button_id in ("run", "history", "delete"):
+            self.query_one(f"#{button_id}", Button).disabled = not has_jobs
 
     def refresh_jobs(self) -> None:
         jobs = load_jobs(self.config_dir)
@@ -64,6 +73,7 @@ class MainMenuScreen(Screen):
             list_view.append(ListItem(Label(format_job_label(j.name, j.method.value, j.source, j.destination))))
         status = self.query_one("#status", Static)
         status.update("No jobs yet. Add one." if not jobs else "")
+        self._update_button_states(jobs)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         jobs = load_jobs(self.config_dir)
@@ -77,6 +87,9 @@ class MainMenuScreen(Screen):
             from abackup.tui.screens.run_all import RunAllScreen
 
             self.app.push_screen(RunAllScreen(self.config_dir, self.data_dir))
+            return
+        if event.button.id == "history":
+            self._open_history(jobs, list_view.index or 0)
             return
         if event.button.id == "settings":
             from abackup.tui.screens.settings import SettingsScreen
@@ -100,3 +113,21 @@ class MainMenuScreen(Screen):
         elif event.button.id == "delete":
             save_jobs(remove_job(jobs, job.id), self.config_dir)
             self.refresh_jobs()
+
+    def _open_history(self, jobs: list, index: int) -> None:
+        if not jobs:
+            self.query_one("#status", Static).update("No job selected.")
+            return
+        if index >= len(jobs):
+            index = len(jobs) - 1
+        job = jobs[index]
+        from abackup.tui.screens.history import HistoryScreen
+
+        self.app.push_screen(HistoryScreen(self.config_dir, self.data_dir, job))
+
+    def on_key(self, event) -> None:
+        # H opens history for the selected job (RM-06).
+        if event.key == "h":
+            jobs = load_jobs(self.config_dir)
+            list_view = self.query_one("#jobs", ListView)
+            self._open_history(jobs, list_view.index or 0)
