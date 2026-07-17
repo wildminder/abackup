@@ -59,6 +59,16 @@ class MainMenuScreen(Screen):
         min-width: 12;
         padding: 0 1;
     }
+    /* Disabled buttons must not react to hover (no false "active" affordance). */
+    Button:disabled {
+        color: $text-muted;
+        background: $panel;
+        text-style: none;
+    }
+    Button:disabled:hover {
+        background: $panel;
+        color: $text-muted;
+    }
     #confirm_msg {
         padding: 1 2;
         width: 60%;
