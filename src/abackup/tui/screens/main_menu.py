@@ -103,11 +103,11 @@ class MainMenuScreen(Screen):
     def _update_button_states(self, jobs: list) -> None:
         """Enable job-dependent buttons only when at least one job exists.
 
-        Export/Import are always available: Import is the primary way to
-        bootstrap an empty config, and Export can save settings alone.
+        Export is disabled with no jobs (nothing to export); Import stays
+        available since it bootstraps an empty config.
         """
         has_jobs = bool(jobs)
-        for button_id in ("run", "history", "delete"):
+        for button_id in ("run", "history", "delete", "export"):
             self.query_one(f"#{button_id}", Button).disabled = not has_jobs
 
     def refresh_jobs(self) -> None:

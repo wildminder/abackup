@@ -125,11 +125,10 @@ async def test_main_menu_shows_empty_state(tmp_config, tmp_data):
         assert "No jobs yet" in str(status.render())
         assert len(app.screen.query_one("#jobs", ListView).children) == 0
         # Job-dependent buttons are disabled until a job exists.
-        for bid in ("run", "history", "delete"):
+        for bid in ("run", "history", "delete", "export"):
             assert app.screen.query_one(f"#{bid}", Button).disabled is True
-        # Export/Import stay available even with no jobs (import bootstraps a config).
-        for bid in ("export", "import"):
-            assert app.screen.query_one(f"#{bid}", Button).disabled is False
+        # Import stays available even with no jobs (it bootstraps a config).
+        assert app.screen.query_one("#import", Button).disabled is False
         # Unrelated actions remain available.
         assert app.screen.query_one("#add", Button).disabled is False
         assert app.screen.query_one("#run_all", Button).disabled is False
