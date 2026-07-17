@@ -1,6 +1,7 @@
 import json
 import threading
 from datetime import UTC, datetime
+from pathlib import Path
 
 from abackup.core.backup import run_job
 from abackup.models import BackupJob
@@ -397,6 +398,24 @@ def test_runner_passes_prefer_py7zr_through(tmp_config, tmp_data, monkeypatch):
     job = BackupJob(source=str(Path(tmp_data) / "s"), destination=str(Path(tmp_data) / "o"), method="copy")
     runner_mod.run_jobs_batch([job], config_dir=tmp_config, data_dir=tmp_data, prefer_py7zr=False)
     assert captured["prefer_py7zr"] is False
+
+
+def test_run_job_copy_passes_prefer_robocopy(tmp_config, tmp_data, monkeypatch):
+    """The copy engine receives prefer_robocopy from run_job."""
+    import abackup.core.backup as backup_mod
+    from abackup.models import BackupJob
+
+    captured = {}
+
+    def fake_copy_tree(source, destination, **kwargs):
+        captured["prefer_robocopy"] = kwargs.get("prefer_robocopy")
+        return {"files_total": 0, "files_copied": 0, "files_skipped": 0,
+                "files_failed": 0, "failed_files": [], "files_excluded": 0, "bytes_copied": 0}
+
+    monkeypatch.setattr(backup_mod, "copy_tree", fake_copy_tree)
+    job = BackupJob(source=str(Path(tmp_data) / "s"), destination=str(Path(tmp_data) / "o"), method="copy")
+    backup_mod.run_job(job, config_dir=tmp_config, data_dir=tmp_data, prefer_robocopy=False)
+    assert captured["prefer_robocopy"] is False
 
 
 def test_run_job_dry_run_no_write(sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch):

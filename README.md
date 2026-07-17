@@ -131,6 +131,11 @@ Open the **Settings** screen from the main menu to tune global options:
 - **Notify on finish** — show a desktop notification when a batch of jobs
   completes (uses `plyer` when available, otherwise a best-effort OS call).
 - **Sound on failure** — play a short system beep if any job in a run fails.
+- **Prefer robocopy (Windows)** — when enabled (the default) and `robocopy.exe`
+  is available, the **copy** backup method delegates to the native Windows
+  `robocopy` for faster, more resilient mirroring. On other platforms, or if
+  `robocopy` is missing, ABackup automatically falls back to its built-in
+  Python engine. Disable this to always use the Python engine.
 
 You can also inspect the resolved config directory and current settings non-interactively:
 

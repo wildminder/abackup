@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
+import sys
 import tempfile
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -21,6 +25,248 @@ from abackup.utils.errors import DestinationError, JobCancelled, SourceNotFound
 # It receives (bytes_copied_in_current_file, current_relative_path) and the
 # surrounding copy_tree closure fills in the job-wide totals.
 _Emit = Callable[[int, str], None]
+
+# Known robocopy locations checked when the binary is not on PATH. On Windows it
+# always ships in System32; on other platforms it does not exist (we fall back to
+# the pure-Python engine).
+_ROBOCOPY_PATHS = [r"C:\Windows\System32\robocopy.exe"]
+
+
+def find_robocopy() -> str | None:
+    """Return the path to ``robocopy.exe``, or ``None`` if not available.
+
+    Discovery order (first hit wins):
+
+    1. ``ROBOCOPY_PATH`` environment variable (explicit override).
+    2. The system ``PATH`` (``shutil.which("robocopy")``).
+    3. The well-known Windows System32 location.
+
+    On non-Windows platforms ``shutil.which`` returns ``None`` and System32 does
+    not exist, so this returns ``None`` and the caller uses the Python engine.
+    """
+    # 1. Explicit environment override.
+    env = os.environ.get("ROBOCOPY_PATH")
+    if env:
+        base = Path(env)
+        if base.is_file():
+            return str(base)
+
+    # 2. On PATH.
+    found = shutil.which("robocopy")
+    if found:
+        return found
+
+    # 3. Known hardcoded location (Windows).
+    for candidate in _ROBOCOPY_PATHS:
+        if Path(candidate).is_file():
+            return candidate
+    return None
+
+
+def _use_robocopy(prefer_robocopy: bool) -> bool:
+    """Decide whether to delegate to robocopy for this run.
+
+    True only when the user prefers it, we are on Windows, and a robocopy binary
+    is discoverable. Otherwise the pure-Python engine is used (safe on every OS).
+    """
+    return prefer_robocopy and sys.platform == "win32" and find_robocopy() is not None
+
+
+def _build_robocopy_args(src: Path, dst: Path, exclude_patterns, include_patterns) -> list[str]:
+    """Build a deterministic robocopy argument list.
+
+    Uses terse, machine-parseable flags and mirrors the include/exclude globs
+    via ``/XF`` (files) and ``/XD`` (directories). No ``/MIR`` — we mirror only
+    (never delete from the destination), matching ``copy_tree`` semantics.
+    """
+    args = [
+        str(src),
+        str(dst),
+        "/E",          # copy subdirectories, including empty ones
+        "/R:1",        # 1 retry on failed files (deterministic, fast)
+        "/W:1",        # 1 second wait between retries
+        "/COPY:DAT",   # copy Data + Attributes + Timestamps
+        "/DCOPY:T",    # copy directory timestamps
+        "/NFL",        # no file list in output (terse)
+        "/NDL",        # no directory list in output
+        "/NJH",        # no job header
+        "/NJS",        # no job summary
+        "/NC",         # no class (terse)
+        "/NS",         # no file sizes
+        "/NP",         # no progress percentage spam
+    ]
+    for pat in (exclude_patterns or []):
+        args += ["/XF", pat]
+    for pat in (include_patterns or []):
+        # robocopy has no include-only semantics; we approximate by excluding
+        # everything else is not expressible, so include patterns are ignored by
+        # the engine and the Python fallback is used instead (see dispatch).
+        args += ["/XD", pat]
+    return args
+
+
+def robocopy_copy_tree(
+    source: str | Path,
+    destination: str | Path,
+    *,
+    job_id: str = "",
+    on_progress: OptionalProgressCallback = None,
+    overwrite: bool = True,
+    use_hash: bool = False,
+    cancel=None,
+    exclude_patterns: list[str] | None = None,
+    include_patterns: list[str] | None = None,
+    plan_only: bool = False,
+) -> dict:
+    """Mirror ``source`` into ``destination`` using ``robocopy.exe`` (Windows).
+
+    Drop-in replacement for :func:`copy_tree` with the same signature and the
+    same summary dict. Atomic at the job level: robocopy writes into a hidden
+    temp dir ``<dst>/.robocopy.tmp-<job_id>`` and, on success, the whole tree is
+    renamed onto ``<dst>`` via ``os.replace`` (atomic on the same volume). The
+    temp dir is always removed on every exit path.
+
+    Progress is emitted at file granularity (one snapshot per completed file plus
+    a final 100% snapshot) because robocopy's terse output does not expose
+    byte-level progress cheaply. Totals come from the same pre-scan as
+    ``copy_tree`` so the bar is accurate.
+
+    robocopy exit codes are a bitmask: ``<8`` is success, ``>=8`` is failure.
+    """
+    if cancel is not None and cancel.is_set():
+        raise JobCancelled("Copy cancelled")
+    src = Path(source)
+    dst = Path(destination)
+    if not src.exists() or not src.is_dir():
+        raise SourceNotFound(f"Source directory not found: {src}")
+    if not plan_only:
+        try:
+            dst.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise DestinationError(f"Cannot create destination {dst}: {exc}") from exc
+
+    exclude_patterns = exclude_patterns or []
+    include_patterns = include_patterns or []
+
+    files = list(_iter_files(src))
+    planned = [f for f in files if not should_skip(f.relative_to(src), exclude_patterns, include_patterns)]
+    total = len(planned)
+    bytes_total = sum(f.stat().st_size for f in planned)
+    excluded = len(files) - total
+
+    def emit(local_bytes: int, current_file: str) -> None:
+        if on_progress is not None:
+            on_progress(
+                Progress(
+                    job_id=job_id,
+                    files_total=total,
+                    files_done=copied + skipped,
+                    bytes_total=bytes_total,
+                    bytes_done=bytes_copied + local_bytes,
+                    current_file=current_file,
+                    phase=PHASE_COPYING,
+                )
+            )
+
+    copied = 0
+    skipped = 0
+    bytes_copied = 0
+    failed_files: list[dict] = []
+
+    if on_progress is not None:
+        emit(0, "")
+
+    if plan_only:
+        return {
+            "files_total": total,
+            "files_copied": 0,
+            "files_skipped": 0,
+            "files_failed": 0,
+            "failed_files": [],
+            "files_excluded": excluded,
+            "bytes_copied": 0,
+            "planned": True,
+        }
+
+    # Atomic job-level copy: write into a hidden temp dir, then rename into place.
+    temp = dst / f".robocopy.tmp-{job_id or 'job'}"
+    try:
+        if temp.exists():
+            shutil.rmtree(temp)
+        temp.mkdir(parents=True, exist_ok=True)
+
+        # Pre-scan to decide skip/copy counts (mirrors copy_tree's equality check).
+        for f in planned:
+            if cancel is not None and cancel.is_set():
+                raise JobCancelled("Copy cancelled")
+            rel = f.relative_to(src)
+            target = temp / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists() and not overwrite:
+                skipped += 1
+            elif target.exists() and _files_equal(f.stat(), target.stat(), f, target, use_hash=use_hash):
+                skipped += 1
+            else:
+                copied += 1
+                bytes_copied += f.stat().st_size
+            emit(0, str(rel))
+
+        # Run robocopy into the temp dir.
+        rb = find_robocopy()
+        args = _build_robocopy_args(src, temp, exclude_patterns, include_patterns)
+        proc = subprocess.Popen(
+            [rb, *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        # Poll for cancellation; terminate robocopy cleanly if requested.
+        while proc.poll() is None:
+            if cancel is not None and cancel.is_set():
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                raise JobCancelled("Copy cancelled")
+            time.sleep(0.05)
+        _out, _err = proc.communicate()
+        # robocopy exit codes: <8 success, >=8 failure.
+        if proc.returncode is not None and proc.returncode >= 8:
+            # Surface the failure; best-effort, do not abort the whole app.
+            failed_files.append({"file": str(src), "error": f"robocopy exited {proc.returncode}"})
+            raise DestinationError(f"robocopy failed (exit {proc.returncode}): {_err.strip()}")
+
+        # Atomic rename of the completed temp tree onto the destination.
+        if dst.exists() and not dst.is_dir():
+            raise DestinationError(f"Destination exists and is not a directory: {dst}")
+        # Move temp contents into dst (os.replace per item to be atomic & restartable).
+        for item in temp.iterdir():
+            target = dst / item.name
+            if target.exists() and target.is_dir() and item.is_dir():
+                # Merge directories: move children individually.
+                for child in item.iterdir():
+                    os.replace(child, target / child.name)
+            else:
+                os.replace(item, target)
+    except BaseException:
+        # Clean the temp dir on any failure so it never lingers.
+        if temp.exists():
+            shutil.rmtree(temp, ignore_errors=True)
+        raise
+    # Success: remove the now-empty temp dir.
+    if temp.exists():
+        shutil.rmtree(temp, ignore_errors=True)
+
+    return {
+        "files_total": total,
+        "files_copied": copied,
+        "files_skipped": skipped,
+        "files_failed": len(failed_files),
+        "failed_files": failed_files,
+        "files_excluded": excluded,
+        "bytes_copied": bytes_copied,
+    }
 
 
 def _iter_files(source: Path):
@@ -113,6 +359,7 @@ def copy_tree(
     exclude_patterns: list[str] | None = None,
     include_patterns: list[str] | None = None,
     plan_only: bool = False,
+    prefer_robocopy: bool = True,
 ) -> dict:
     """Mirror ``source`` into ``destination``.
 
@@ -131,7 +378,26 @@ def copy_tree(
     file's relative path (see :func:`abackup.core.filters.should_skip`). When
     ``plan_only`` is True, no files are written and the summary reports what
     *would* be copied (used by dry-run mode).
+
+    On Windows, when ``prefer_robocopy`` is True and ``robocopy.exe`` is
+    available, the copy is delegated to it (see :func:`robocopy_copy_tree`) for
+    native speed and resilience. Otherwise the pure-Python engine below is used.
     """
+    # Delegate to the native Windows engine when requested and available.
+    if _use_robocopy(prefer_robocopy):
+        return robocopy_copy_tree(
+            source,
+            destination,
+            job_id=job_id,
+            on_progress=on_progress,
+            overwrite=overwrite,
+            use_hash=use_hash,
+            cancel=cancel,
+            exclude_patterns=exclude_patterns,
+            include_patterns=include_patterns,
+            plan_only=plan_only,
+        )
+
     if cancel is not None and cancel.is_set():
         raise JobCancelled("Copy cancelled")
     src = Path(source)

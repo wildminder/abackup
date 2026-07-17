@@ -1094,6 +1094,31 @@ async def test_settings_notify_toggles_reflect_loaded(tmp_config, tmp_data):
         assert app.screen.query_one("#sound_on_failure", Checkbox).value is False
 
 
+async def test_settings_prefer_robocopy_toggle_persists(tmp_config, tmp_data):
+    """RM-17: the prefer-robocopy checkbox saves into settings."""
+    save_settings(Settings(prefer_robocopy=True), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(app.config_dir, app.data_dir))
+        await pilot.pause()
+        # Default is True; flip it off and save.
+        app.screen.query_one("#prefer_robocopy", Checkbox).value = False
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+    settings = load_settings(tmp_config)
+    assert settings.prefer_robocopy is False
+
+
+async def test_settings_prefer_robocopy_reflects_loaded(tmp_config, tmp_data):
+    """RM-17: loaded prefer_robocopy is reflected in the checkbox on mount."""
+    save_settings(Settings(prefer_robocopy=False), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(app.config_dir, app.data_dir))
+        await pilot.pause()
+        assert app.screen.query_one("#prefer_robocopy", Checkbox).value is False
+
+
 async def test_run_job_screen_notifies_on_success_when_enabled(
     tmp_config, tmp_data, sample_tree, dest_dir, monkeypatch
 ):

@@ -218,3 +218,16 @@ def test_prefer_py7zr_default_false():
     # Default is to prefer the (multithreaded, faster) system 7-Zip binary;
     # py7zr is the fallback. This keeps backups fast out of the box.
     assert Settings().prefer_py7zr is False
+
+
+def test_prefer_robocopy_default_true():
+    # On Windows we prefer the faster, restartable robocopy engine by default;
+    # the pure-Python engine remains the portable fallback.
+    assert Settings().prefer_robocopy is True
+
+
+def test_settings_roundtrip_prefer_robocopy():
+    s = Settings(prefer_robocopy=False)
+    assert Settings.from_dict(s.to_dict()).prefer_robocopy is False
+    s2 = Settings(prefer_robocopy=True)
+    assert Settings.from_dict(s2.to_dict()).prefer_robocopy is True

@@ -180,6 +180,19 @@ class SettingsScreen(Screen):
                 ),
                 classes="field",
             ),
+            Vertical(
+                Checkbox(
+                    "Use robocopy for direct copies (Windows, when available)",
+                    id="prefer_robocopy",
+                ),
+                Static(
+                    "On Windows, the 'copy' method delegates to the native robocopy.exe "
+                    "for faster, more resilient mirroring. Disable to always use the "
+                    "built-in Python engine (also used automatically on other OSes).",
+                    classes="field-hint",
+                ),
+                classes="field",
+            ),
             Static("", id="error"),
             id="body",
         )
@@ -210,6 +223,7 @@ class SettingsScreen(Screen):
         self.query_one("#run_on_startup", Checkbox).value = self._existing.run_on_startup
         self.query_one("#notify_on_finish", Checkbox).value = self._existing.notify_on_finish
         self.query_one("#sound_on_failure", Checkbox).value = self._existing.sound_on_failure
+        self.query_one("#prefer_robocopy", Checkbox).value = self._existing.prefer_robocopy
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
@@ -233,6 +247,7 @@ class SettingsScreen(Screen):
             run_on_startup = self.query_one("#run_on_startup", Checkbox).value
             notify_on_finish = self.query_one("#notify_on_finish", Checkbox).value
             sound_on_failure = self.query_one("#sound_on_failure", Checkbox).value
+            prefer_robocopy = self.query_one("#prefer_robocopy", Checkbox).value
         except ValueError as exc:
             error.update(f"Invalid number: {exc}")
             return
@@ -250,6 +265,7 @@ class SettingsScreen(Screen):
             run_on_startup=run_on_startup,
             notify_on_finish=notify_on_finish,
             sound_on_failure=sound_on_failure,
+            prefer_robocopy=prefer_robocopy,
             created_at=self._existing.created_at,
         )
         try:

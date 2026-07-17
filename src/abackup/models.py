@@ -41,6 +41,7 @@ class Settings:
     zip_compression_level: int = 6
     seven_zip_compression_level: int = 3
     prefer_py7zr: bool = False
+    prefer_robocopy: bool = True
     theme: str = "dark"
     run_mode: str = "parallel"
     run_on_startup: bool = False

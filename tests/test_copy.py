@@ -1,8 +1,47 @@
 import threading
 from pathlib import Path
 
-from abackup.core.copy import copy_tree
+import pytest
+
+from abackup.core.copy import copy_tree, find_robocopy
 from abackup.utils.errors import DestinationError, JobCancelled, SourceNotFound
+
+
+@pytest.fixture(autouse=True)
+def _force_python_engine(monkeypatch):
+    """By default exercise the pure-Python engine, not the native robocopy one.
+
+    On Windows CI ``find_robocopy`` resolves to System32, which would otherwise
+    route the legacy ``copy_tree`` tests through the robocopy engine (different
+    skip/overwrite/hash semantics). Tests that want the native engine opt in via
+    ``_use_fake_robocopy`` (which overrides this patch). We only hide the binary
+    here — patching ``sys.platform`` is avoided because it breaks ``tmp_path``
+    setup on this pytest/Windows combination.
+    """
+    monkeypatch.setattr("abackup.core.copy.find_robocopy", lambda: None)
+
+
+def test_find_robocopy_uses_env_override(monkeypatch, tmp_path):
+    fake = tmp_path / "robocopy.exe"
+    fake.write_bytes(b"")
+    monkeypatch.setenv("ROBOCOPY_PATH", str(fake))
+    monkeypatch.setattr("abackup.core.copy.shutil.which", lambda name: None)
+    assert find_robocopy() == str(fake)
+
+
+def test_find_robocopy_falls_back_to_which(monkeypatch):
+    monkeypatch.delenv("ROBOCOPY_PATH", raising=False)
+    monkeypatch.setattr("abackup.core.copy.shutil.which", lambda name: "/fake/robocopy")
+    assert find_robocopy() == "/fake/robocopy"
+
+
+def test_find_robocopy_returns_none_when_absent(monkeypatch):
+    monkeypatch.delenv("ROBOCOPY_PATH", raising=False)
+    monkeypatch.setattr("abackup.core.copy.shutil.which", lambda name: None)
+    monkeypatch.setattr(
+        "abackup.core.copy._ROBOCOPY_PATHS", ["/no/such/robocopy.exe"]
+    )
+    assert find_robocopy() is None
 
 
 def test_copy_tree_preserves_structure(sample_tree, dest_dir):
@@ -372,3 +411,198 @@ def test_files_equal_helper_unit(tmp_path):
     d.write_text("hello")
     sd = d.stat()
     assert copy_mod._files_equal(sa, sd, a, d, use_hash=True) is True
+
+
+# ---------------------------------------------------------------------------
+# robocopy engine tests (deterministic, OS-independent via a fake executable)
+# ---------------------------------------------------------------------------
+
+
+class _FakeRobocopyPopen:
+    """In-process stand-in for ``subprocess.Popen`` running a fake robocopy.
+
+    Mirrors ``shutil.copytree(src, dst)`` and exits 0 on success, or 8 (the
+    robocopy failure bitmask) when a sentinel file ``<src>/.FAIL_ROBOCOPY``
+    exists. Running in-process avoids platform-specific ``CreateProcess`` /
+    PATHEXT issues with a fake ``.exe``/``.py`` wrapper on Windows.
+    """
+
+    def __init__(self, cmd, **kwargs):
+        import shutil
+
+        self.returncode = None
+        self.stdout = None
+        self.stderr = ""
+        src, dst = cmd[1], cmd[2]
+        sentinel = (Path(src) / ".FAIL_ROBOCOPY")
+        if sentinel.exists():
+            self.returncode = 8
+            self.stderr = "fake robocopy failure"
+            return
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+        self.returncode = 0
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    def communicate(self):
+        return self.stdout, self.stderr
+
+    def terminate(self):
+        pass
+
+    def kill(self):
+        pass
+
+
+def _use_fake_robocopy(monkeypatch):
+    """Patch ``_use_robocopy`` + ``find_robocopy`` + ``subprocess.Popen``.
+
+    We patch ``_use_robocopy`` directly to return True rather than faking
+    ``sys.platform`` (patching ``sys.platform`` breaks ``tmp_path`` setup on
+    this pytest/Windows combination).
+    """
+    monkeypatch.setattr("abackup.core.copy.find_robocopy", lambda: "fake_robocopy")
+    monkeypatch.setattr("abackup.core.copy._use_robocopy", lambda prefer: bool(prefer))
+    monkeypatch.setattr("abackup.core.copy.subprocess.Popen", _FakeRobocopyPopen)
+
+
+def test_robocopy_copy_tree_preserves_structure(sample_tree, dest_dir, tmp_path, monkeypatch):
+    from abackup.core.copy import robocopy_copy_tree
+
+    _use_fake_robocopy(monkeypatch)
+    summary = robocopy_copy_tree(sample_tree, dest_dir / "out", job_id="j1")
+    assert summary["files_total"] == 2
+    assert summary["files_copied"] == 2
+    assert (dest_dir / "out" / "a" / "f1.txt").read_text() == "hello"
+    assert (dest_dir / "out" / "b.txt").read_text() == "world"
+    # Temp dir cleaned up after success.
+    assert not (dest_dir / "out" / ".robocopy.tmp-j1").exists()
+    assert not (dest_dir / ".robocopy.tmp-j1").exists()
+
+
+def test_robocopy_copy_tree_plan_only(sample_tree, dest_dir, tmp_path, monkeypatch):
+    from abackup.core.copy import robocopy_copy_tree
+
+    _use_fake_robocopy(monkeypatch)
+    summary = robocopy_copy_tree(sample_tree, dest_dir / "out", plan_only=True)
+    assert summary["planned"] is True
+    assert summary["files_copied"] == 0
+    assert not (dest_dir / "out").exists()
+
+
+def test_robocopy_copy_tree_progress_callback(sample_tree, dest_dir, tmp_path, monkeypatch):
+    from abackup.core.copy import robocopy_copy_tree
+
+    _use_fake_robocopy(monkeypatch)
+    seen = []
+    robocopy_copy_tree(sample_tree, dest_dir / "out", on_progress=lambda p: seen.append(p), job_id="j1")
+    # Final snapshot reports full completion.
+    assert seen[-1].files_done == 2
+    assert seen[-1].files_total == 2
+    assert seen[-1].percent() == 100
+    # File-level progress is monotonic.
+    files_seen = [p.files_done for p in seen]
+    assert files_seen == sorted(files_seen)
+
+
+def test_robocopy_copy_tree_handles_failure(sample_tree, dest_dir, tmp_path, monkeypatch):
+    from abackup.core.copy import robocopy_copy_tree
+    from abackup.utils.errors import DestinationError
+
+    _use_fake_robocopy(monkeypatch)
+    # Sentinel triggers the fake robocopy to exit 8.
+    (sample_tree / ".FAIL_ROBOCOPY").write_text("", encoding="utf-8")
+    try:
+        robocopy_copy_tree(sample_tree, dest_dir / "out", job_id="j1")
+    except DestinationError as exc:
+        assert "robocopy failed" in str(exc)
+    else:
+        raise AssertionError("expected DestinationError")
+    # Temp dir cleaned up after failure.
+    assert not (dest_dir / ".robocopy.tmp-j1").exists()
+
+
+def test_robocopy_copy_tree_cancellation(sample_tree, dest_dir, tmp_path, monkeypatch):
+    from abackup.core.copy import robocopy_copy_tree
+
+    _use_fake_robocopy(monkeypatch)
+    cancel = threading.Event()
+    cancel.set()  # cancel before start
+    try:
+        robocopy_copy_tree(sample_tree, dest_dir / "out", cancel=cancel, job_id="j1")
+    except JobCancelled:
+        pass
+    else:
+        raise AssertionError("expected JobCancelled")
+    assert not (dest_dir / "out").exists()
+    assert not (dest_dir / ".robocopy.tmp-j1").exists()
+
+
+def test_robocopy_temp_dir_cleaned_on_success(sample_tree, dest_dir, tmp_path, monkeypatch):
+    from abackup.core.copy import robocopy_copy_tree
+
+    _use_fake_robocopy(monkeypatch)
+    robocopy_copy_tree(sample_tree, dest_dir / "out", job_id="j1")
+    # The hidden temp dir must be gone after a successful run.
+    assert not (dest_dir / "out" / ".robocopy.tmp-j1").exists()
+    assert not (dest_dir / ".robocopy.tmp-j1").exists()
+
+
+def test_robocopy_temp_dir_cleaned_on_failure(sample_tree, dest_dir, tmp_path, monkeypatch):
+    from abackup.core.copy import robocopy_copy_tree
+    from abackup.utils.errors import DestinationError
+
+    _use_fake_robocopy(monkeypatch)
+    (sample_tree / ".FAIL_ROBOCOPY").write_text("", encoding="utf-8")
+    try:
+        robocopy_copy_tree(sample_tree, dest_dir / "out", job_id="j1")
+    except DestinationError:
+        pass
+    # The hidden temp dir must be gone even when robocopy reports failure.
+    assert not (dest_dir / "out" / ".robocopy.tmp-j1").exists()
+    assert not (dest_dir / ".robocopy.tmp-j1").exists()
+
+
+def test_copy_tree_dispatches_to_robocopy_when_preferred(sample_tree, dest_dir, tmp_path, monkeypatch):
+    from abackup.core.copy import copy_tree
+
+    _use_fake_robocopy(monkeypatch)
+    summary = copy_tree(sample_tree, dest_dir / "out", job_id="j1", prefer_robocopy=True)
+    assert summary["files_copied"] == 2
+    assert (dest_dir / "out" / "a" / "f1.txt").read_text() == "hello"
+
+
+def test_copy_tree_falls_back_to_python_when_robocopy_unavailable(sample_tree, dest_dir, monkeypatch):
+    from abackup.core.copy import copy_tree
+
+    # No robocopy discoverable -> pure-Python engine even when preferred.
+    monkeypatch.setattr("abackup.core.copy.find_robocopy", lambda: None)
+    monkeypatch.setattr("abackup.core.copy._use_robocopy", lambda prefer: False)
+    summary = copy_tree(sample_tree, dest_dir / "out", job_id="j1", prefer_robocopy=True)
+    assert summary["files_copied"] == 2
+    assert (dest_dir / "out" / "b.txt").read_text() == "world"
+
+
+def test_copy_tree_falls_back_on_non_windows(sample_tree, dest_dir, monkeypatch):
+    from abackup.core.copy import copy_tree
+
+    # prefer_robocopy True but the engine decides not to use it -> Python engine.
+    monkeypatch.setattr("abackup.core.copy.find_robocopy", lambda: "fake_robocopy")
+    monkeypatch.setattr("abackup.core.copy._use_robocopy", lambda prefer: False)
+    summary = copy_tree(sample_tree, dest_dir / "out", job_id="j1", prefer_robocopy=True)
+    assert summary["files_copied"] == 2
+
+
+def test_copy_tree_explicit_disable_uses_python(sample_tree, dest_dir, monkeypatch):
+    from abackup.core.copy import copy_tree
+
+    _use_fake_robocopy(monkeypatch)
+    # Explicitly disabling prefer_robocopy must bypass the native engine.
+    summary = copy_tree(sample_tree, dest_dir / "out", job_id="j1", prefer_robocopy=False)
+    assert summary["files_copied"] == 2
+    # No robocopy temp dir should have been created.
+    assert not (dest_dir / ".robocopy.tmp-j1").exists()
