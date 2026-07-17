@@ -258,6 +258,169 @@ def test_cli_run_all_dry_run_no_writes(tmp_config, tmp_data, sample_tree, tmp_pa
     assert captured["dry_run"] is True
 
 
+# ---------------------------------------------------------------------------
+# Portable, config-free one-shot backup mode (--source/--destination/--method)
+# ---------------------------------------------------------------------------
+
+
+def test_portable_requires_all_three_args(sample_tree, tmp_path):
+    # Supplying only part of the portable group is a usage error (exit 2).
+    with pytest.raises(SystemExit) as exc:
+        main(["--source", str(sample_tree)])
+    assert exc.value.code == 2
+    with pytest.raises(SystemExit) as exc:
+        main(["--destination", str(tmp_path / "dst")])
+    assert exc.value.code == 2
+    with pytest.raises(SystemExit) as exc:
+        main(["--method", "copy"])
+    assert exc.value.code == 2
+
+
+def test_portable_invalid_method_exits_2(sample_tree, tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        main(["--source", str(sample_tree), "--destination", str(tmp_path / "dst"), "--method", "tar"])
+    assert exc.value.code == 2
+
+
+def test_portable_not_triggered_without_group(tmp_config, tmp_data, monkeypatch):
+    # Without any portable arg, the existing TUI/headless path is used (no
+    # SystemExit from the portable guard). We just assert the parser accepts it.
+    args = build_parser().parse_args([])
+    assert args.source is None and args.destination is None and args.method is None
+
+
+def test_portable_source_missing_exits_2(tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        main(["--source", str(tmp_path / "nope"), "--destination", str(tmp_path / "dst"), "--method", "copy"])
+    assert exc.value.code == 2
+
+
+def test_portable_dest_inside_source_exits_2(sample_tree, tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        main(["--source", str(sample_tree), "--destination", str(sample_tree / "sub"), "--method", "copy"])
+    assert exc.value.code == 2
+
+
+def test_portable_builds_job_in_memory(sample_tree, tmp_path, monkeypatch):
+    # The job is built in memory; no config load/save must occur.
+    captured = {}
+    load_spy = {"jobs": 0, "settings": 0}
+
+    def fake_run_job(job, **kwargs):
+        captured["job"] = job
+        captured["portable"] = kwargs.get("portable")
+        from abackup.core.backup import BackupResult
+
+        return BackupResult(job.id, job.method.value, "success", {}, None, None, job)
+
+    def spy_load_jobs(*_a, **_k):
+        load_spy["jobs"] += 1
+        return []
+
+    def spy_load_settings(*_a, **_k):
+        load_spy["settings"] += 1
+        return None
+
+    monkeypatch.setattr("abackup.cli.run_job", fake_run_job)
+    monkeypatch.setattr("abackup.cli.load_jobs", spy_load_jobs)
+    monkeypatch.setattr("abackup.cli.load_settings", spy_load_settings)
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "--source", str(sample_tree),
+                "--destination", str(tmp_path / "dst"),
+                "--method", "7z",
+                "--name", "mybackup",
+                "--exclude", "*.tmp",
+                "--exclude", "*.log",
+                "--include", "*.txt",
+            ]
+        )
+    assert exc.value.code == 0
+    assert load_spy == {"jobs": 0, "settings": 0}
+    assert captured["portable"] is True
+    j = captured["job"]
+    assert j.source == str(sample_tree)
+    assert j.destination == str(tmp_path / "dst")
+    assert j.method.value == "7z"
+    assert j.name == "mybackup"
+    assert j.exclude_patterns == ["*.tmp", "*.log"]
+    assert j.include_patterns == ["*.txt"]
+
+
+def test_portable_runs_copy_and_exits_0(sample_tree, tmp_path, capsys):
+    dst = tmp_path / "dst"
+    with pytest.raises(SystemExit) as exc:
+        main(["--source", str(sample_tree), "--destination", str(dst), "--method", "copy"])
+    assert exc.value.code == 0
+    assert dst.is_dir()
+    # The source tree was copied into the destination.
+    assert (dst / "a" / "f1.txt").is_file()
+    assert (dst / "b.txt").is_file()
+    out = capsys.readouterr().out
+    assert "success" in out
+    assert str(sample_tree) in out
+
+
+def test_portable_runs_zip_and_exits_0(sample_tree, tmp_path):
+    dst = tmp_path / "dst"
+    with pytest.raises(SystemExit) as exc:
+        main(["--source", str(sample_tree), "--destination", str(dst), "--method", "zip"])
+    assert exc.value.code == 0
+    archives = list(dst.glob("*.zip"))
+    assert len(archives) == 1
+
+
+def test_portable_runs_7z_and_exits_0(sample_tree, tmp_path):
+    dst = tmp_path / "dst"
+    with pytest.raises(SystemExit) as exc:
+        main(["--source", str(sample_tree), "--destination", str(dst), "--method", "7z"])
+    assert exc.value.code == 0
+    archives = list(dst.glob("*.7z"))
+    assert len(archives) == 1
+
+
+def test_portable_failure_exits_1(sample_tree, tmp_path):
+    # A destination that is an existing file is invalid -> backup fails (exit 1).
+    bad = tmp_path / "file_dst.txt"
+    bad.write_text("i am a file")
+    with pytest.raises(SystemExit) as exc:
+        main(["--source", str(sample_tree), "--destination", str(bad), "--method", "copy"])
+    assert exc.value.code == 1
+
+
+def test_portable_dry_run_exits_0_no_writes(sample_tree, tmp_path):
+    dst = tmp_path / "dst"
+    with pytest.raises(SystemExit) as exc:
+        main(["--source", str(sample_tree), "--destination", str(dst), "--method", "copy", "--dry-run"])
+    assert exc.value.code == 0
+    # Dry run must not create the destination.
+    assert not dst.exists()
+
+
+def test_portable_quiet_suppresses_output(sample_tree, tmp_path, capsys):
+    dst = tmp_path / "dst"
+    with pytest.raises(SystemExit) as exc:
+        main(["--source", str(sample_tree), "--destination", str(dst), "--method", "copy", "--quiet"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_portable_writes_no_config_files(sample_tree, tmp_path, monkeypatch):
+    # Even with a config dir available, portable mode must not write jobs/settings.
+    import abackup.cli as cli_mod
+
+    monkeypatch.setattr(cli_mod, "get_config_dir", lambda override=None: str(tmp_path / "cfg"))
+    dst = tmp_path / "dst"
+    with pytest.raises(SystemExit) as exc:
+        main(["--source", str(sample_tree), "--destination", str(dst), "--method", "copy"])
+    assert exc.value.code == 0
+    cfg = tmp_path / "cfg"
+    assert not (cfg / "jobs.json").exists()
+    assert not (cfg / "settings.json").exists()
+
+
 def test_cli_list_jobs_prints_names(tmp_config, tmp_data, capsys):
     jobs = [
         BackupJob(source="C:/a", destination="D:/b", method="copy", name="alpha"),

@@ -13,10 +13,11 @@ from abackup.config import (
     load_jobs,
     load_settings,
 )
-from abackup.core.backup import BackupResult
+from abackup.core.backup import BackupResult, format_summary, run_job
 from abackup.core.jobs import find_job_by_name
-from abackup.core.paths import get_config_dir
+from abackup.core.paths import get_config_dir, is_inside
 from abackup.core.runner import run_jobs_batch
+from abackup.models import BackupJob, BackupMethod
 from abackup.tui.app import ABackupApp
 
 
@@ -85,6 +86,39 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the resolved config directory and current settings as JSON, then exit",
     )
+    # Portable, config-free one-shot backup. Supplying any of these triggers
+    # portable mode (no jobs.json / settings.json are read or written).
+    parser.add_argument("--source", default=None, help="Portable mode: source folder to back up")
+    parser.add_argument("--destination", default=None, help="Portable mode: destination folder")
+    parser.add_argument(
+        "--method",
+        default=None,
+        choices=["copy", "zip", "7z"],
+        help="Portable mode: backup method (copy, zip, 7z)",
+    )
+    parser.add_argument("--name", default=None, help="Portable mode: display name (not persisted)")
+    parser.add_argument(
+        "--exclude",
+        action="append",
+        default=None,
+        help="Portable mode: exclude glob pattern (repeatable)",
+    )
+    parser.add_argument(
+        "--include",
+        action="append",
+        default=None,
+        help="Portable mode: include glob pattern (repeatable)",
+    )
+    parser.add_argument(
+        "--stamp",
+        action="store_true",
+        help="Portable mode: write into a timestamped subfolder of the destination",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Portable mode: suppress progress/summary output (exit code still set)",
+    )
     return parser
 
 
@@ -127,8 +161,81 @@ def _run_batch(jobs, args, settings) -> list[BackupResult]:
     )
 
 
+def _run_portable(args) -> None:
+    """Config-free one-shot backup from CLI args (portable mode).
+
+    Builds a ``BackupJob`` in memory, validates the source/destination, runs a
+    single atomic backup via ``run_job(portable=True)``, and exits with a code
+    reflecting the result. No jobs.json / settings.json are read or written.
+    """
+    # Step 1: the portable group requires all three core args together.
+    portable_args = (("--source", args.source), ("--destination", args.destination), ("--method", args.method))
+    missing = [n for n, v in portable_args if v is None]
+    if missing:
+        print(f"Portable mode requires {', '.join(missing)} (all three).", file=sys.stderr)
+        raise SystemExit(2)
+
+    # Step 2: build the job in memory (no config load/save).
+    try:
+        method = BackupMethod.from_str(args.method)
+    except Exception as exc:  # ConfigError from invalid method
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    job = BackupJob(
+        source=args.source,
+        destination=args.destination,
+        method=method,
+        name=args.name or "",
+        exclude_patterns=list(args.exclude or []),
+        include_patterns=list(args.include or []),
+        subfolder_stamp=bool(args.stamp),
+    )
+
+    # Source must exist and be a directory.
+    from pathlib import Path
+
+    if not Path(args.source).is_dir():
+        print(f"Source not found or not a directory: {args.source}", file=sys.stderr)
+        raise SystemExit(2)
+    # Destination must not live inside the source (would recurse / overwrite).
+    if is_inside(args.destination, args.source):
+        print(f"Destination must not be inside the source: {args.destination}", file=sys.stderr)
+        raise SystemExit(2)
+
+    # Step 4: run atomically, config-free. Use a temp data dir unless the user
+    # opts in with --data-dir (best-effort logs only; nothing is required).
+    import tempfile
+
+    data_dir = args.data_dir or tempfile.mkdtemp(prefix="abackup-portable-")
+    result = run_job(
+        job,
+        data_dir=data_dir,
+        portable=True,
+        dry_run=args.dry_run,
+        prefer_robocopy=True,
+    )
+
+    if not args.quiet:
+        print(f"{job.source} -> {job.destination} [{job.method.value}]")
+        print(f"  {result.status}: {format_summary(result.summary)}")
+    if result.status == "failed":
+        print(result.error or "Backup failed.", file=sys.stderr)
+        raise SystemExit(1)
+    if result.status == "cancelled":
+        print("Backup cancelled.", file=sys.stderr)
+        raise SystemExit(2)
+    raise SystemExit(0)
+
+
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
+    # Portable mode: any of the portable group triggers a config-free one-shot
+    # backup. All three core args are required together.
+    if args.source is not None or args.destination is not None or args.method is not None:
+        _run_portable(args)
+        return
+
     if args.show_settings:
         config_dir = get_config_dir(args.config_dir)
         settings = load_settings(args.config_dir)

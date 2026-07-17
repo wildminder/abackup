@@ -106,6 +106,46 @@ The process exit code reflects the outcome of a run:
 A missing job name (`--run nope`) or a malformed import file exits non-zero with
 a descriptive message on stderr/stdout.
 
+### Portable one-shot backup (no config files)
+
+For a quick, fully portable backup you can supply the source, destination and
+method directly on the command line. ABackup builds the job **in memory** and
+writes **no config files** (no `jobs.json` / `settings.json` are created or read):
+
+```bash
+abackup --source C:\Users\me\Documents --destination D:\Backups\docs --method copy
+abackup --source C:\Users\me\Photos  --destination D:\Backups\photos --method zip
+abackup --source C:\Users\me\Data   --destination D:\Backups\data  --method 7z
+```
+
+Options:
+
+| Flag | Meaning |
+|------|---------|
+| `--source DIR` | Source folder to back up (required). |
+| `--destination DIR` | Destination folder (required). |
+| `--method {copy,zip,7z}` | Backup method (required). |
+| `--name NAME` | Display name only (not persisted). |
+| `--exclude PATTERN` | Exclude glob; repeatable. |
+| `--include PATTERN` | Include glob; repeatable. |
+| `--stamp` | Write into a timestamped subfolder of the destination. |
+| `--dry-run` | Plan only; write nothing. |
+| `--quiet` | Suppress progress/summary output (exit code still set). |
+| `--data-dir DIR` | Optional: where best-effort logs go (defaults to a temp dir). |
+
+The backup is **atomic**: a copy is staged in a temp directory and only moved
+into place on success; archive methods write to a temp file and replace the
+final archive atomically. On failure no partial artifacts are left behind, and
+the run exits non-zero.
+
+Exit codes for portable mode:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Backup succeeded. |
+| `1` | Backup failed (e.g. destination is an existing file). |
+| `2` | Invalid usage (missing/invalid args, source missing, destination inside source). |
+
 ### Portable config (export / import)
 
 You can replicate an entire setup on another machine without re-entering jobs:

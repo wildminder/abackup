@@ -85,6 +85,7 @@ def run_job(
     threads: int | None = None,
     cancel: threading.Event | None = None,
     dry_run: bool = False,
+    portable: bool = False,
 ) -> BackupResult:
     """Run a single backup job.
 
@@ -98,12 +99,21 @@ def run_job(
     When ``dry_run`` is True, the job is planned (files scanned, include/exclude
     applied) but nothing is written and no manifest is produced; the summary
     reports the planned totals.
+
+    When ``portable`` is True, no manifest/log/history is written and the backup
+    is performed atomically (staged in a temp location, then moved/replaced into
+    place only on success). This is the config-free one-shot mode used by the
+    CLI ``--source/--destination/--method`` invocation.
     """
     clock = clock or _now
     data_dir = get_data_dir(data_dir)
-    ensure_dir(Path(data_dir) / "manifests")
-    ensure_dir(Path(data_dir) / "logs")
-    logger = RunLogger(data_dir, job.id)
+    if portable:
+        # No persistent side outputs in portable mode.
+        logger = None
+    else:
+        ensure_dir(Path(data_dir) / "manifests")
+        ensure_dir(Path(data_dir) / "logs")
+        logger = RunLogger(data_dir, job.id)
     started_at = clock()
 
     # Forward progress to the caller while remembering the latest snapshot so we
@@ -134,6 +144,8 @@ def run_job(
 
     def _record_history(status: str, summary: dict, error: str | None, archive_out=None) -> None:
         """Append a RunHistoryEntry for this execution (RM-06)."""
+        if portable:
+            return
         finished_at = clock()
         prev = last.get("p")
         archive_size = None
@@ -167,6 +179,17 @@ def run_job(
     # RM-10: optionally write each run into its own timestamped subfolder.
     dest = resolve_destination(job, clock=clock, stamp=job.subfolder_stamp)
 
+    # Portable copy atomicity: stage into a temp dir, then move into place only
+    # on success. Archive methods are already atomic (temp file + os.replace).
+    import shutil
+    import tempfile
+
+    staging_dest = None
+    effective_dest = dest
+    if portable and job.method == BackupMethod.COPY and not dry_run:
+        staging_dest = Path(tempfile.mkdtemp(prefix="abackup-stage-"))
+        effective_dest = staging_dest
+
     try:
         if job.method == BackupMethod.ZIP:
             out = make_zip(
@@ -199,7 +222,7 @@ def run_job(
         else:
             summary = copy_tree(
                 job.source,
-                dest,
+                effective_dest,
                 job_id=job.id,
                 on_progress=_forward,
                 use_hash=use_hash,
@@ -211,12 +234,17 @@ def run_job(
             )
         status = "success"
     except JobCancelled:
+        if staging_dest is not None and staging_dest.exists():
+            shutil.rmtree(staging_dest, ignore_errors=True)
         _terminal(PHASE_CANCELLED, STATUS_CANCELLED)
         _record_history("cancelled", {}, "cancelled")
         updated = BackupJob(**{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "cancelled"})
         return BackupResult(job.id, job.method.value, "cancelled", {}, None, "cancelled", updated)
     except (SourceNotFound, DestinationError) as exc:
-        logger.log("error", {"job_id": job.id, "error": str(exc)})
+        if staging_dest is not None and staging_dest.exists():
+            shutil.rmtree(staging_dest, ignore_errors=True)
+        if logger is not None:
+            logger.log("error", {"job_id": job.id, "error": str(exc)})
         _terminal(PHASE_FAILED, STATUS_FAILED)
         _record_history("failed", {}, str(exc))
         updated = BackupJob(**{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "failed"})
@@ -229,11 +257,34 @@ def run_job(
         updated = BackupJob(**{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "success"})
         return BackupResult(job.id, job.method.value, "success", summary, None, None, updated)
 
+    # Portable copy atomicity: move the staged tree into the real destination.
+    if staging_dest is not None:
+        dest_path = Path(dest)
+        try:
+            if dest_path.exists():
+                shutil.rmtree(dest_path, ignore_errors=True)
+            shutil.move(str(staging_dest), str(dest_path))
+        except OSError as exc:
+            # e.g. destination is an existing file -> cannot move a dir onto it.
+            if staging_dest.exists():
+                shutil.rmtree(staging_dest, ignore_errors=True)
+            if logger is not None:
+                logger.log("error", {"job_id": job.id, "error": str(exc)})
+            _terminal(PHASE_FAILED, STATUS_FAILED)
+            _record_history("failed", {}, str(exc))
+            updated = BackupJob(**{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "failed"})
+            return BackupResult(job.id, job.method.value, "failed", {}, None, str(exc), updated)
+
     _terminal(PHASE_DONE, STATUS_SUCCESS)
 
     # For archive methods `out` is a path; for copy it is the summary dict.
     archive_out = out if job.method != BackupMethod.COPY else None
     _record_history("success", summary, None, archive_out)
+
+    if portable:
+        # Config-free mode: no manifest/log persistence.
+        updated = BackupJob(**{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": status})
+        return BackupResult(job.id, job.method.value, status, summary, None, None, updated)
 
     manifest = {
         "job_id": job.id,

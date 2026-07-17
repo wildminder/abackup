@@ -547,3 +547,83 @@ def test_format_summary_renders_friendly_string():
     assert "failed: 1" in out
     # Unknown keys fall back to a compact key=value rendering.
     assert format_summary({"custom": "v"}) == "custom: v"
+
+
+# ---------------------------------------------------------------------------
+# Portable mode: config-free, atomic execution (portable=True)
+# ---------------------------------------------------------------------------
+
+
+def test_run_job_portable_no_manifest_or_history(sample_tree, dest_dir, tmp_data):
+    """Portable mode writes no manifest and records no history."""
+    from abackup.core.history import load_history
+
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
+    result = run_job(job, data_dir=tmp_data, clock=_clock, portable=True)
+    assert result.status == "success"
+    # No manifest file is produced.
+    assert result.manifest_path is None
+    # No history entry is appended.
+    assert load_history(tmp_data, job.id) == []
+    # The backup data itself is still written to the destination.
+    assert (dest_dir / "out" / "b.txt").is_file()
+
+
+def test_run_job_portable_copy_atomic_success(sample_tree, dest_dir, tmp_data):
+    """On success the staged copy is moved into the real destination."""
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
+    result = run_job(job, data_dir=tmp_data, clock=_clock, portable=True)
+    assert result.status == "success"
+    assert (dest_dir / "out" / "b.txt").read_text() == "world"
+    assert (dest_dir / "out" / "a" / "f1.txt").is_file()
+
+
+def test_run_job_portable_copy_atomic_failure_leaves_dest_untouched(sample_tree, dest_dir, tmp_data):
+    """On failure the staging dir is removed and the destination is untouched."""
+    # Point the destination at a file so copy_tree fails (DestinationError).
+    bad = dest_dir / "file_dst.txt"
+    bad.write_text("i am a file")
+    job = BackupJob(source=str(sample_tree), destination=str(bad), method="copy")
+    result = run_job(job, data_dir=tmp_data, clock=_clock, portable=True)
+    assert result.status == "failed"
+    # The original (invalid) destination file is still there, unchanged.
+    assert bad.is_file()
+    assert bad.read_text() == "i am a file"
+    # No leftover staging directories under the data dir.
+    assert not list(Path(tmp_data).glob("abackup-stage-*"))
+
+
+def test_run_job_portable_archive_atomic_success(sample_tree, dest_dir, tmp_data):
+    """Archive methods produce the final archive and no temp leftovers."""
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="zip")
+    result = run_job(job, data_dir=tmp_data, clock=_clock, portable=True, prefer_py7zr=False)
+    assert result.status == "success"
+    archives = list(dest_dir.glob("*.zip"))
+    assert len(archives) == 1
+    # No .tmp leftovers from the atomic archive write.
+    assert not list(dest_dir.glob("*.tmp"))
+
+
+def test_run_job_portable_archive_atomic_failure_removes_temp(sample_tree, dest_dir, tmp_data, monkeypatch):
+    """If archive creation fails, the temp file is removed and no final exists."""
+    import abackup.core.backup as backup_mod
+    from abackup.utils.errors import DestinationError
+
+    def fake_make_zip(source, destination, **kwargs):
+        from pathlib import Path
+
+        # Simulate a failure after creating a temp file (the real engine
+        # cleans up its own temp in a finally; mirror that here).
+        tmp = Path(destination) / "x.tmp"
+        try:
+            tmp.write_text("partial")
+            raise DestinationError("compress boom")
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    monkeypatch.setattr(backup_mod, "make_zip", fake_make_zip)
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="zip")
+    result = run_job(job, data_dir=tmp_data, clock=_clock, portable=True, prefer_py7zr=False)
+    assert result.status == "failed"
+    assert not list(dest_dir.glob("*.zip"))
+    assert not list(dest_dir.glob("*.tmp"))
