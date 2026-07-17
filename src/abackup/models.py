@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -21,7 +21,7 @@ class BackupMethod(str, Enum):
     SEVEN_ZIP = "7z"
 
     @classmethod
-    def from_str(cls, value: str) -> "BackupMethod":
+    def from_str(cls, value: str) -> BackupMethod:
         try:
             return cls(value)
         except ValueError as exc:
@@ -29,7 +29,7 @@ class BackupMethod(str, Enum):
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @dataclass
@@ -42,13 +42,15 @@ class Settings:
     seven_zip_compression_level: int = 3
     prefer_py7zr: bool = False
     theme: str = "dark"
+    run_mode: str = "parallel"
+    run_on_startup: bool = False
     created_at: str = field(default_factory=lambda: _now().isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Settings":
+    def from_dict(cls, data: dict[str, Any]) -> Settings:
         data = dict(data)
         # Backward-compat: the old "prefer_7z" key meant "prefer 7z over zip";
         # it now controls the 7z engine (py7zr library vs system binary).
@@ -69,6 +71,8 @@ class Settings:
             raise ConfigError("log_level must be one of DEBUG/INFO/WARNING/ERROR")
         if self.theme not in {"light", "dark"}:
             raise ConfigError("theme must be one of light/dark")
+        if self.run_mode not in {"parallel", "sequential"}:
+            raise ConfigError("run_mode must be one of parallel/sequential")
 
 
 @dataclass
@@ -81,6 +85,11 @@ class BackupJob:
     created_at: str = field(default_factory=lambda: _now().isoformat())
     last_run_at: str | None = None
     last_status: str | None = None
+    schedule_interval_hours: int | None = None
+    exclude_patterns: list[str] = field(default_factory=list)
+    include_patterns: list[str] = field(default_factory=list)
+    retention_count: int | None = None
+    tag: str | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.method, str):
@@ -94,13 +103,28 @@ class BackupJob:
         seed = f"{self.source}|{self.destination}|{self.method.value}|{self.created_at}"
         return uuid.uuid5(NAMESPACE, seed).hex
 
+    def validate(self) -> None:
+        """Raise ``ConfigError`` if any Tier-1 field is out of its valid range."""
+        if self.schedule_interval_hours is not None and self.schedule_interval_hours < 1:
+            raise ConfigError("schedule_interval_hours must be >= 1")
+        if self.retention_count is not None and self.retention_count < 1:
+            raise ConfigError("retention_count must be >= 1")
+        if not isinstance(self.exclude_patterns, list) or not all(
+            isinstance(p, str) for p in self.exclude_patterns
+        ):
+            raise ConfigError("exclude_patterns must be a list of strings")
+        if not isinstance(self.include_patterns, list) or not all(
+            isinstance(p, str) for p in self.include_patterns
+        ):
+            raise ConfigError("include_patterns must be a list of strings")
+
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["method"] = self.method.value
         return d
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "BackupJob":
+    def from_dict(cls, data: dict[str, Any]) -> BackupJob:
         data = dict(data)
         data["method"] = BackupMethod.from_str(data.get("method", "copy"))
         return cls(**data)

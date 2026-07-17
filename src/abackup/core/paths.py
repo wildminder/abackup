@@ -127,7 +127,7 @@ def shorten_path(
         root_text = str(root)
         # Case-insensitive prefix match (Windows paths).
         if text.lower().startswith(root_text.lower()):
-            rel = text[len(root_text):].lstrip("\\/")
+            rel = text[len(root_text) :].lstrip("\\/")
             text = rel or base.name
         else:
             # Not under the source root -> fall back to the basename only.

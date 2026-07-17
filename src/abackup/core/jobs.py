@@ -39,3 +39,14 @@ def remove_job(jobs: list[BackupJob], job_id: str) -> list[BackupJob]:
 
 def list_jobs(jobs: list[BackupJob]) -> list[BackupJob]:
     return list(jobs)
+
+
+def filter_by_tag(jobs: list[BackupJob], tag: str | None) -> list[BackupJob]:
+    """Return jobs matching ``tag``.
+
+    When ``tag`` is None, all jobs are returned (no filtering). When ``tag`` is
+    a string, only jobs whose ``tag`` equals it are returned.
+    """
+    if tag is None:
+        return list(jobs)
+    return [j for j in jobs if j.tag == tag]

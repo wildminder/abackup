@@ -2,17 +2,17 @@ from datetime import date
 from pathlib import Path
 
 from abackup.core.paths import (
+    default_config_dir,
+    ensure_dir,
+    format_job_label,
     get_config_dir,
     get_data_dir,
-    ensure_dir,
-    safe_archive_name,
-    unique_archive_name,
-    settings_file_path,
     jobs_file_path,
-    default_config_dir,
-    shorten_path,
+    safe_archive_name,
+    settings_file_path,
     shorten_display_path,
-    format_job_label,
+    shorten_path,
+    unique_archive_name,
 )
 
 
@@ -202,9 +202,7 @@ def test_shorten_display_path_still_too_long_truncates_tail():
 
 
 def test_format_job_label_basic():
-    label = format_job_label(
-        "Docs", "7z", "C:/Users/art/Documents", "D:/Backups"
-    )
+    label = format_job_label("Docs", "7z", "C:/Users/art/Documents", "D:/Backups")
     assert label == "Docs [7z]: C:/Users/art/Documents -> D:/Backups"
 
 

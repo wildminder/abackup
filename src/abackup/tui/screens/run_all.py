@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import threading
 
-from textual.screen import Screen
 from textual.containers import Horizontal
-from textual.widgets import ProgressBar, Static, Button, RichLog
+from textual.screen import Screen
+from textual.widgets import Button, ProgressBar, RichLog, Static
 
 from abackup.config import load_jobs, load_settings
+from abackup.core.jobs import filter_by_tag
 from abackup.core.paths import shorten_path
 from abackup.core.progress import Progress
 from abackup.core.runner import run_jobs_batch
@@ -29,12 +30,16 @@ class RunAllScreen(Screen):
 
     A **Cancel** button sets a shared ``threading.Event`` that the runner checks
     between (and, for copies, during) files, aborting all jobs promptly.
+
+    Optional ``tag`` filters jobs to a group; ``dry_run`` plans without writing.
     """
 
-    def __init__(self, config_dir, data_dir):
+    def __init__(self, config_dir, data_dir, tag: str | None = None, dry_run: bool = False):
         super().__init__()
         self.config_dir = config_dir
         self.data_dir = data_dir
+        self.tag = tag
+        self.dry_run = dry_run
         self._completed = False
         self._worker = None
         self._cancel = threading.Event()
@@ -44,7 +49,12 @@ class RunAllScreen(Screen):
         self._job_names: dict[str, str] = {}
 
     def compose(self):
-        yield Static("Running all backup jobs", id="title")
+        title = "Running all backup jobs"
+        if self.tag:
+            title += f" (tag: {self.tag})"
+        if self.dry_run:
+            title += " [DRY RUN]"
+        yield Static(title, id="title")
         yield ProgressBar(total=100, id="progress")
         yield Static("", id="jobs")
         yield RichLog(id="log")
@@ -56,6 +66,8 @@ class RunAllScreen(Screen):
 
     def on_mount(self) -> None:
         jobs = load_jobs(self.config_dir)
+        if self.tag is not None:
+            jobs = filter_by_tag(jobs, self.tag)
         progress = self.query_one("#progress", ProgressBar)
         log = self.query_one("#log", RichLog)
         summary = self.query_one("#summary", Static)
@@ -94,6 +106,8 @@ class RunAllScreen(Screen):
                 max_workers=settings.max_workers,
                 prefer_py7zr=settings.prefer_py7zr,
                 seven_zip_compression_level=settings.seven_zip_compression_level,
+                run_mode=settings.run_mode,
+                dry_run=self.dry_run,
                 on_job_done=on_job_done,
                 on_progress=on_progress,
                 cancel=self._cancel,
@@ -103,8 +117,8 @@ class RunAllScreen(Screen):
             cancelled = sum(1 for r in results if r.status == "cancelled")
             self.app.call_from_thread(
                 self._finish,
-                f"Completed {len(results)} jobs: {success} success, "
-                f"{failed} failed, {cancelled} cancelled.",
+                f"Completed {len(results)} jobs: {success} success, {failed} failed, {cancelled} cancelled."
+                + (" (dry run)" if self.dry_run else ""),
             )
 
         self._worker = self.run_worker(run_batch, thread=True)

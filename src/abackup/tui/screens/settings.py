@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-from textual.containers import Vertical, Horizontal, ScrollableContainer
+from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.screen import Screen
-from textual.widgets import Input, Select, Static, Button, Header, Footer, Label, Checkbox
+from textual.widgets import Button, Checkbox, Footer, Header, Input, Label, Select, Static
 
 from abackup.config import (
     load_settings,
-    save_settings,
-    relocate_storage,
     relocate_data,
+    relocate_storage,
+    save_settings,
 )
+from abackup.core.platform_task import register_startup, unregister_startup
 from abackup.models import Settings
 from abackup.utils.errors import ConfigError
 
@@ -66,7 +68,11 @@ class SettingsScreen(Screen):
             Vertical(
                 Label("Storage directory", classes="field-label"),
                 Input(id="config_dir", placeholder="e.g. C:\\Users\\me\\abackup"),
-                Static("Where jobs, settings and logs are stored. Changing it moves all data.", classes="field-hint"),
+                Static(
+                    "Where jobs and settings are stored. Changing it moves all data.",
+                    id="storage_hint",
+                    classes="field-hint",
+                ),
                 classes="field",
             ),
             Vertical(
@@ -77,7 +83,10 @@ class SettingsScreen(Screen):
             ),
             Vertical(
                 Label("7z compression level (0-9)", classes="field-label"),
-                Input(id="sz_level", placeholder="0 = copy, 3 = fast, 5 = normal, 9 = ultra, default 3"),
+                Input(
+                    id="sz_level",
+                    placeholder="0 = copy, 3 = fast, 5 = normal, 9 = ultra, default 3",
+                ),
                 Static(
                     "LZMA2 preset for the '7z' method. 0 stores (no compression), "
                     "3 is fast, 9 is ultra (slowest). Default 3.",
@@ -112,17 +121,39 @@ class SettingsScreen(Screen):
                 classes="field",
             ),
             Vertical(
+                Label("Run mode (Run all jobs)", classes="field-label"),
+                Select(
+                    [("Parallel (concurrent)", "parallel"), ("Sequential (one by one)", "sequential")],
+                    id="run_mode",
+                    prompt="Run mode",
+                ),
+                Static("How 'Run all jobs' executes: concurrent workers or strictly in order.", classes="field-hint"),
+                classes="field",
+            ),
+            Vertical(
                 Checkbox(
                     "Prefer py7zr library for 7z (else system 7-Zip binary)",
                     id="prefer_py7zr",
                 ),
-            Static(
-                "By default 7z jobs use the (multithreaded, much faster) system "
-                "7-Zip binary when installed. Enable this to force the pure-Python "
-                "py7zr library instead (portable fallback, slower). The 'zip' "
-                "method is unaffected and always uses Python's zipfile.",
-                classes="field-hint",
+                Static(
+                    "By default 7z jobs use the (multithreaded, much faster) system "
+                    "7-Zip binary when installed. Enable this to force the pure-Python "
+                    "py7zr library instead (portable fallback, slower). The 'zip' "
+                    "method is unaffected and always uses Python's zipfile.",
+                    classes="field-hint",
+                ),
+                classes="field",
             ),
+            Vertical(
+                Checkbox(
+                    "Run ABackup on system startup (current user login)",
+                    id="run_on_startup",
+                ),
+                Static(
+                    "Registers ABackup to launch on login (Windows Task Scheduler or "
+                    "a systemd --user unit / XDG autostart). Disabling removes the task.",
+                    classes="field-hint",
+                ),
                 classes="field",
             ),
             Static("", id="error"),
@@ -138,13 +169,21 @@ class SettingsScreen(Screen):
     def on_mount(self) -> None:
         self._existing = load_settings(self.config_dir)
         self.query_one("#config_dir", Input).value = str(self.config_dir)
+        # Reflect whether logs/manifests live under a separate data dir.
+        if self.data_dir and Path(self.data_dir).resolve() != Path(self.config_dir).resolve():
+            self.query_one("#storage_hint", Static).update(
+                "Where jobs and settings are stored. Logs and manifests are written "
+                f"to the separate data directory: {self.data_dir}"
+            )
         self.query_one("#zip_level", Input).value = str(self._existing.zip_compression_level)
         self.query_one("#sz_level", Input).value = str(self._existing.seven_zip_compression_level)
         self.query_one("#workers", Input).value = str(self._existing.max_workers)
         self.query_one("#log_level", Select).value = self._existing.log_level
         self.query_one("#theme", Select).value = self._existing.theme
         self.query_one("#default_dest", Input).value = self._existing.default_destination or ""
+        self.query_one("#run_mode", Select).value = self._existing.run_mode
         self.query_one("#prefer_py7zr", Checkbox).value = self._existing.prefer_py7zr
+        self.query_one("#run_on_startup", Checkbox).value = self._existing.run_on_startup
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
@@ -163,7 +202,9 @@ class SettingsScreen(Screen):
             log_level = self.query_one("#log_level", Select).value
             theme = self.query_one("#theme", Select).value
             default_dest = self.query_one("#default_dest", Input).value.strip() or None
+            run_mode = self.query_one("#run_mode", Select).value
             prefer_py7zr = self.query_one("#prefer_py7zr", Checkbox).value
+            run_on_startup = self.query_one("#run_on_startup", Checkbox).value
         except ValueError as exc:
             error.update(f"Invalid number: {exc}")
             return
@@ -177,6 +218,8 @@ class SettingsScreen(Screen):
             seven_zip_compression_level=sz_level,
             prefer_py7zr=prefer_py7zr,
             theme=theme,
+            run_mode=run_mode,
+            run_on_startup=run_on_startup,
             created_at=self._existing.created_at,
         )
         try:
@@ -198,6 +241,15 @@ class SettingsScreen(Screen):
             self.data_dir = str(new)
 
         save_settings(updated, self.config_dir)
+        # Register/remove the OS startup task to match the toggle.
+        try:
+            if run_on_startup:
+                register_startup(command=f"{sys.executable} -m abackup --run-due --config-dir {self.config_dir}")
+            else:
+                unregister_startup()
+        except Exception:
+            # Startup registration is best-effort; never block saving settings.
+            pass
         # Apply the chosen theme live (light/dark).
         self.app.apply_theme(theme)
 

@@ -1,4 +1,4 @@
-from abackup.core.jobs import add_job, get_job, update_job, remove_job, list_jobs
+from abackup.core.jobs import add_job, get_job, list_jobs, remove_job, update_job
 from abackup.models import BackupJob
 from abackup.utils.errors import JobNotFound
 

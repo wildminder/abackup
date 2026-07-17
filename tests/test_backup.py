@@ -1,12 +1,12 @@
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from abackup.core.backup import run_job
 from abackup.models import BackupJob
 
 
 def _clock():
-    return datetime(2026, 7, 12, 10, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 7, 12, 10, 0, 0, tzinfo=UTC)
 
 
 def test_run_job_copy(sample_tree, dest_dir, tmp_config, tmp_data):
@@ -21,18 +21,14 @@ def test_run_job_copy(sample_tree, dest_dir, tmp_config, tmp_data):
 
 def test_run_job_zip(sample_tree, dest_dir, tmp_config, tmp_data):
     job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="zip")
-    result = run_job(
-        job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock, prefer_py7zr=False
-    )
+    result = run_job(job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock, prefer_py7zr=False)
     assert result.status == "success"
     assert "archive" in result.summary
 
 
 def test_run_job_seven_zip(sample_tree, dest_dir, tmp_config, tmp_data):
     job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="7z")
-    result = run_job(
-        job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock, prefer_py7zr=False
-    )
+    result = run_job(job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock, prefer_py7zr=False)
     assert result.status == "success"
     assert result.summary["archive"].endswith(".7z")
 
@@ -57,12 +53,23 @@ def test_run_job_writes_manifest(sample_tree, dest_dir, tmp_config, tmp_data):
 
 
 def test_run_job_uses_compression_level(sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch):
-    import abackup.core.backup as backup_mod
     from pathlib import Path
+
+    import abackup.core.backup as backup_mod
 
     captured = {}
 
-    def fake_make_zip(source, destination, *, when=None, compress_level=6, cancel=None, job_id="", on_progress=None):
+    def fake_make_zip(
+        source,
+        destination,
+        *,
+        when=None,
+        compress_level=6,
+        cancel=None,
+        job_id="",
+        on_progress=None,
+        **kwargs,
+    ):
         captured["compress_level"] = compress_level
         return Path(destination) / "x.zip"
 
@@ -79,8 +86,9 @@ def test_run_job_uses_compression_level(sample_tree, dest_dir, tmp_config, tmp_d
 
 
 def test_run_job_uses_seven_zip_compression_level(sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch):
-    import abackup.core.backup as backup_mod
     from pathlib import Path
+
+    import abackup.core.backup as backup_mod
 
     captured = {}
 
@@ -96,6 +104,7 @@ def test_run_job_uses_seven_zip_compression_level(sample_tree, dest_dir, tmp_con
         prefer_7z=True,
         prefer_py7zr=True,
         threads=None,
+        **kwargs,
     ):
         captured["compress_level"] = compress_level
         return Path(destination) / "x.7z"
@@ -112,15 +121,24 @@ def test_run_job_uses_seven_zip_compression_level(sample_tree, dest_dir, tmp_con
     assert captured["compress_level"] == 4
 
 
-def test_run_job_zip_level_independent_from_seven_zip_level(
-    sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch
-):
-    import abackup.core.backup as backup_mod
+def test_run_job_zip_level_independent_from_seven_zip_level(sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch):
     from pathlib import Path
+
+    import abackup.core.backup as backup_mod
 
     captured = {}
 
-    def fake_make_zip(source, destination, *, when=None, compress_level=6, cancel=None, job_id="", on_progress=None):
+    def fake_make_zip(
+        source,
+        destination,
+        *,
+        when=None,
+        compress_level=6,
+        cancel=None,
+        job_id="",
+        on_progress=None,
+        **kwargs,
+    ):
         captured.setdefault("zip", compress_level)
         return Path(destination) / "x.zip"
 
@@ -136,6 +154,7 @@ def test_run_job_zip_level_independent_from_seven_zip_level(
         prefer_7z=True,
         prefer_py7zr=True,
         threads=None,
+        **kwargs,
     ):
         captured.setdefault("seven", compress_level)
         return Path(destination) / "x.7z"
@@ -191,9 +210,7 @@ def test_run_job_cancel_copy_mid_run(sample_tree, dest_dir, tmp_config, tmp_data
 
 def test_run_job_copy_emits_progress(sample_tree, dest_dir, tmp_config, tmp_data):
     seen = []
-    job = BackupJob(
-        source=str(sample_tree), destination=str(dest_dir / "out"), method="copy"
-    )
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
     run_job(
         job,
         config_dir=tmp_config,
@@ -225,9 +242,7 @@ def test_run_job_zip_emits_progress(sample_tree, dest_dir, tmp_config, tmp_data)
 
 def test_run_job_missing_source_emits_failed(sample_tree, dest_dir, tmp_config, tmp_data):
     seen = []
-    job = BackupJob(
-        source=str(dest_dir / "missing"), destination=str(dest_dir), method="copy"
-    )
+    job = BackupJob(source=str(dest_dir / "missing"), destination=str(dest_dir), method="copy")
     run_job(
         job,
         config_dir=tmp_config,
@@ -322,3 +337,121 @@ def test_run_job_summary_includes_failed_count(sample_tree, dest_dir, tmp_config
     result = run_job(job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock)
     assert result.summary["files_failed"] == 1
     assert result.summary["failed_files"][0]["error"] == "locked"
+
+
+def test_run_job_default_prefer_py7zr_is_false(sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch):
+    """CRIT-001: run_job must default prefer_py7zr=False to match Settings/README."""
+    from pathlib import Path
+
+    import abackup.core.backup as backup_mod
+
+    captured = {}
+
+    def fake_make_archive(
+        source,
+        destination,
+        *,
+        when=None,
+        compress_level=6,
+        cancel=None,
+        job_id="",
+        on_progress=None,
+        prefer_py7zr=True,
+        threads=None,
+        **kwargs,
+    ):
+        captured["prefer_py7zr"] = prefer_py7zr
+        return Path(destination) / "x.7z"
+
+    monkeypatch.setattr(backup_mod, "make_archive", fake_make_archive)
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="7z")
+    run_job(job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock)
+    assert captured["prefer_py7zr"] is False
+
+
+def test_runner_passes_prefer_py7zr_through(tmp_config, tmp_data, monkeypatch):
+    """CRIT-001: run_jobs_batch forwards prefer_py7zr to run_job unchanged."""
+    import abackup.core.runner as runner_mod
+    from abackup.models import BackupJob
+
+    captured = {}
+
+    def fake_run_job(job, **kwargs):
+        captured["prefer_py7zr"] = kwargs.get("prefer_py7zr")
+        from abackup.core.backup import BackupResult
+
+        return BackupResult(
+            job.id,
+            job.method.value,
+            "success",
+            {},
+            None,
+            None,
+            job,
+        )
+
+    monkeypatch.setattr(runner_mod, "run_job", fake_run_job)
+    from pathlib import Path
+
+    job = BackupJob(source=str(Path(tmp_data) / "s"), destination=str(Path(tmp_data) / "o"), method="copy")
+    runner_mod.run_jobs_batch([job], config_dir=tmp_config, data_dir=tmp_data, prefer_py7zr=False)
+    assert captured["prefer_py7zr"] is False
+
+
+def test_run_job_dry_run_no_write(sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch):
+    """RM-05b: dry-run plans but writes nothing and produces no manifest."""
+    import abackup.core.backup as backup_mod
+
+    # Spy on the real copy_tree to confirm it is invoked in plan_only mode
+    # (so the plan is computed) but writes nothing to the destination.
+    real_copy = backup_mod.copy_tree
+    calls = {"copy": 0}
+
+    def spy_copy_tree(source, destination, **kwargs):
+        calls["copy"] += 1
+        return real_copy(source, destination, **kwargs)
+
+    monkeypatch.setattr(backup_mod, "copy_tree", spy_copy_tree)
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
+    result = run_job(job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock, dry_run=True)
+    # copy_tree is called (to compute the plan) but in plan_only mode it writes nothing.
+    assert calls["copy"] == 1
+    assert result.status == "success"
+    assert result.manifest_path is None
+    assert not (dest_dir / "out").exists()
+    # Dry-run still records last_run_at/status on the updated job.
+    assert result.updated_job.last_status == "success"
+
+
+def test_run_job_retention_deletes_old_archives(sample_tree, dest_dir, tmp_config, tmp_data, monkeypatch):
+    """RM-03: after a successful zip job, old archives beyond retention are pruned."""
+    import abackup.core.backup as backup_mod
+
+    # Make make_zip return distinct archive names so retention has something to prune.
+    created = []
+
+    def fake_make_zip(source, destination, **kwargs):
+        from pathlib import Path
+
+        p = Path(destination) / f"arc_{len(created)}.zip"
+        p.write_text("x")
+        created.append(p)
+        return p
+
+    monkeypatch.setattr(backup_mod, "make_zip", fake_make_zip)
+    # Pre-create 4 old archives in the destination.
+    for i in range(4):
+        (dest_dir / f"old_{i}.zip").write_text("old")
+    job = BackupJob(
+        source=str(sample_tree),
+        destination=str(dest_dir),
+        method="zip",
+        retention_count=2,
+    )
+    result = run_job(job, config_dir=tmp_config, data_dir=tmp_data, clock=_clock, prefer_py7zr=False)
+    assert result.status == "success"
+    # 4 old + 1 new = 5; retention 2 -> 3 deleted.
+    deleted = result.summary.get("archives_deleted", [])
+    assert len(deleted) == 3
+    # Exactly 2 archives remain.
+    assert len(list(dest_dir.glob("*.zip"))) == 2

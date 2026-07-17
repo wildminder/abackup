@@ -2,7 +2,7 @@ import threading
 from pathlib import Path
 
 from abackup.core.copy import copy_tree
-from abackup.utils.errors import SourceNotFound, DestinationError, JobCancelled
+from abackup.utils.errors import DestinationError, JobCancelled, SourceNotFound
 
 
 def test_copy_tree_preserves_structure(sample_tree, dest_dir):
@@ -26,6 +26,22 @@ def test_copy_tree_overwrites_changed(sample_tree, dest_dir):
     summary = copy_tree(sample_tree, dest_dir / "out", overwrite=True)
     assert summary["files_copied"] == 1
     assert (dest_dir / "out" / "b.txt").read_text() == "changed"
+
+
+def test_copy_tree_skips_excluded(sample_tree, dest_dir):
+    # Add a file that matches the exclude pattern.
+    (sample_tree / "b.txt.tmp").write_text("junk", encoding="utf-8")
+    summary = copy_tree(sample_tree, dest_dir / "out", exclude_patterns=["*.tmp"])
+    assert summary["files_excluded"] == 1
+    assert not (dest_dir / "out" / "b.txt.tmp").exists()
+    assert (dest_dir / "out" / "b.txt").exists()
+
+
+def test_copy_tree_plan_only_no_files_written(sample_tree, dest_dir):
+    summary = copy_tree(sample_tree, dest_dir / "out", plan_only=True)
+    assert summary["planned"] is True
+    assert summary["files_copied"] == 0
+    assert not (dest_dir / "out").exists()
 
 
 def test_copy_tree_progress_callback(sample_tree, dest_dir):
@@ -177,9 +193,7 @@ def test_copy_tree_cancel_stops_progress(tmp_path, monkeypatch):
     monkeypatch.setattr(copy_mod, "open", fake_open, raising=False)
     seen = []
     try:
-        copy_tree(
-            src, tmp_path / "out", on_progress=lambda p: seen.append(p), cancel=cancel
-        )
+        copy_tree(src, tmp_path / "out", on_progress=lambda p: seen.append(p), cancel=cancel)
     except JobCancelled:
         pass
     else:

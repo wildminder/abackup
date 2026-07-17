@@ -80,6 +80,58 @@ def test_settings_from_dict_keeps_default_without_field():
     assert s.max_workers == 4
 
 
+def test_settings_run_mode_default_parallel():
+    assert Settings().run_mode == "parallel"
+
+
+def test_settings_run_mode_validation_rejects_invalid():
+    try:
+        Settings(run_mode="fast").validate()
+    except ConfigError:
+        return
+    raise AssertionError("expected ConfigError")
+
+
+def test_settings_run_on_startup_default_false():
+    assert Settings().run_on_startup is False
+
+
+def test_job_tier1_fields_round_trip():
+    j = BackupJob(
+        source="C:/a",
+        destination="D:/b",
+        method="copy",
+        schedule_interval_hours=6,
+        exclude_patterns=["*.tmp"],
+        include_patterns=["*.txt"],
+        retention_count=3,
+        tag="docs",
+    )
+    d = j.to_dict()
+    j2 = BackupJob.from_dict(d)
+    assert j2.schedule_interval_hours == 6
+    assert j2.exclude_patterns == ["*.tmp"]
+    assert j2.include_patterns == ["*.txt"]
+    assert j2.retention_count == 3
+    assert j2.tag == "docs"
+
+
+def test_job_validate_rejects_bad_interval():
+    try:
+        BackupJob(source="C:/a", destination="D:/b", method="copy", schedule_interval_hours=0).validate()
+    except ConfigError:
+        return
+    raise AssertionError("expected ConfigError")
+
+
+def test_job_validate_rejects_bad_retention():
+    try:
+        BackupJob(source="C:/a", destination="D:/b", method="copy", retention_count=0).validate()
+    except ConfigError:
+        return
+    raise AssertionError("expected ConfigError")
+
+
 def test_zip_level_default_6():
     assert Settings().zip_compression_level == 6
 

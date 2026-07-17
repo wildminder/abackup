@@ -87,8 +87,5 @@ def validate_add_job(
     if needed > free * (1 - margin):
         needed_mb = needed / (1024 * 1024)
         free_mb = free / (1024 * 1024)
-        errors.append(
-            f"Not enough free space on destination: need ~{needed_mb:.1f} MB, "
-            f"have ~{free_mb:.1f} MB."
-        )
+        errors.append(f"Not enough free space on destination: need ~{needed_mb:.1f} MB, have ~{free_mb:.1f} MB.")
     return errors

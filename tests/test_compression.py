@@ -6,9 +6,9 @@ import pytest
 from abackup.core import compression
 from abackup.core.compression import (
     find_7z,
-    make_archive,
     make_7z,
     make_7z_py7zr,
+    make_archive,
 )
 from abackup.utils.errors import JobCancelled
 
@@ -44,9 +44,7 @@ def test_find_7z_uses_registry_when_present(monkeypatch, tmp_path):
     exe.write_text("", encoding="utf-8")
     monkeypatch.setattr(compression.shutil, "which", lambda name: None)
     monkeypatch.setattr(compression, "_COMMON_7Z_PATHS", [])
-    monkeypatch.setattr(
-        compression, "_seven_zip_registry_paths", lambda: [str(tmp_path)]
-    )
+    monkeypatch.setattr(compression, "_seven_zip_registry_paths", lambda: [str(tmp_path)])
     assert find_7z() == str(exe)
 
 
@@ -59,9 +57,7 @@ def test_find_7z_prefers_registry_binary_over_gui_less(monkeypatch, tmp_path):
     gui.write_text("", encoding="utf-8")
     monkeypatch.setattr(compression.shutil, "which", lambda name: None)
     monkeypatch.setattr(compression, "_COMMON_7Z_PATHS", [])
-    monkeypatch.setattr(
-        compression, "_seven_zip_registry_paths", lambda: [str(tmp_path)]
-    )
+    monkeypatch.setattr(compression, "_seven_zip_registry_paths", lambda: [str(tmp_path)])
     assert find_7z() == str(cli)
 
 
@@ -136,9 +132,7 @@ def test_have_py7zr_reflects_import(monkeypatch):
 def test_make_archive_uses_py7zr_when_forced(sample_tree, dest_dir):
     # When the user forces py7zr (prefer_py7zr=True), the library is used
     # even though a system binary would otherwise be preferred by default.
-    out = make_archive(
-        sample_tree, dest_dir, when=date(2026, 7, 12), compress_level=6, prefer_py7zr=True
-    )
+    out = make_archive(sample_tree, dest_dir, when=date(2026, 7, 12), compress_level=6, prefer_py7zr=True)
     assert out.suffix == ".7z"
     assert out.exists()
     # The archive must be a real, readable 7z produced by py7zr.
@@ -150,9 +144,7 @@ def test_make_archive_uses_py7zr_when_forced(sample_tree, dest_dir):
     assert "b.txt" in names
 
 
-def test_make_archive_prefers_system_binary_by_default(
-    monkeypatch, sample_tree, dest_dir
-):
+def test_make_archive_prefers_system_binary_by_default(monkeypatch, sample_tree, dest_dir):
     # New default: prefer the (multithreaded, much faster) system 7-Zip binary
     # when present, without the user having to toggle anything.
     monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
@@ -179,9 +171,7 @@ def test_make_archive_prefers_system_binary_by_default(
     assert "-mx6" in captured["cmd"]
 
 
-def test_make_archive_prefers_system_binary_when_prefer_py7zr_false(
-    monkeypatch, sample_tree, dest_dir
-):
+def test_make_archive_prefers_system_binary_when_prefer_py7zr_false(monkeypatch, sample_tree, dest_dir):
     # py7zr is importable, but the user opted to prefer the (faster) system
     # 7-Zip binary, so make_archive must shell out rather than use py7zr.
     monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
@@ -201,18 +191,14 @@ def test_make_archive_prefers_system_binary_when_prefer_py7zr_false(
             return 0
 
     monkeypatch.setattr(compression.subprocess, "Popen", FakeProc)
-    out = make_archive(
-        sample_tree, dest_dir, when=date(2026, 7, 12), prefer_py7zr=False
-    )
+    out = make_archive(sample_tree, dest_dir, when=date(2026, 7, 12), prefer_py7zr=False)
     assert out.suffix == ".7z"
     assert out.exists()
     assert "-t7z" in captured["cmd"]
     assert "-mx6" in captured["cmd"]
 
 
-def test_make_archive_falls_back_to_system_7z_when_py7zr_missing(
-    monkeypatch, sample_tree, dest_dir
-):
+def test_make_archive_falls_back_to_system_7z_when_py7zr_missing(monkeypatch, sample_tree, dest_dir):
     # Simulate py7zr being unavailable; the system binary becomes the fallback.
     monkeypatch.setattr(compression, "py7zr", None)
     monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
@@ -248,6 +234,7 @@ def test_make_archive_falls_back_to_zip_when_no_7z(monkeypatch, sample_tree, des
     assert out.suffix == ".zip"
     assert out.exists()
 
+
 def test_make_7z_py7zr_produces_valid_archive(sample_tree, dest_dir):
     out = make_7z_py7zr(sample_tree, dest_dir, when=date(2026, 7, 12), compress_level=6)
     assert out.suffix == ".7z"
@@ -269,9 +256,7 @@ def test_make_7z_py7zr_cancel_raises(sample_tree, dest_dir):
     assert not list(dest_dir.glob("*.7z"))
 
 
-def test_make_7z_py7zr_uses_preset_and_stays_single_threaded(
-    monkeypatch, sample_tree, dest_dir
-):
+def test_make_7z_py7zr_uses_preset_and_stays_single_threaded(monkeypatch, sample_tree, dest_dir):
     # py7zr honours the LZMA2 "preset" but must NOT pass "threads"
     # (its internal compressor rejects it), so it stays single-threaded -- which
     # is why the multithreaded system binary is preferred by default.
@@ -333,9 +318,7 @@ def test_make_7z_emits_realtime_progress(monkeypatch, sample_tree, dest_dir):
     # intermediate progress (not just start -> done).
     monkeypatch.setattr(compression, "find_7z", lambda: "/fake/7z")
 
-    src_bytes = sum(
-        f.stat().st_size for f in Path(sample_tree).rglob("*") if f.is_file()
-    )
+    src_bytes = sum(f.stat().st_size for f in Path(sample_tree).rglob("*") if f.is_file())
     seed = max(1, src_bytes // 2)
 
     class FakeProc:
@@ -361,9 +344,7 @@ def test_make_7z_emits_realtime_progress(monkeypatch, sample_tree, dest_dir):
 
     monkeypatch.setattr(compression.subprocess, "Popen", FakeProc)
     seen = []
-    out = make_7z(
-        sample_tree, dest_dir, when=date(2026, 7, 12), on_progress=seen.append
-    )
+    out = make_7z(sample_tree, dest_dir, when=date(2026, 7, 12), on_progress=seen.append)
     assert out.suffix == ".7z"
     assert out.exists()
     # Start snapshot (PHASE_ZIPPING) + intermediates + final DONE.
@@ -371,12 +352,7 @@ def test_make_7z_emits_realtime_progress(monkeypatch, sample_tree, dest_dir):
     assert seen[-1].phase == compression.PHASE_DONE
     assert seen[-1].bytes_done == seen[-1].bytes_total
     # Intermediate progress with 0 < bytes_done < bytes_total (the bar moved).
-    inter = [
-        p
-        for p in seen
-        if p.phase == compression.PHASE_ZIPPING
-        and 0 < p.bytes_done < p.bytes_total
-    ]
+    inter = [p for p in seen if p.phase == compression.PHASE_ZIPPING and 0 < p.bytes_done < p.bytes_total]
     assert inter
     # Multiple distinct intermediate values -> smooth movement, not a jump.
     assert len({p.bytes_done for p in inter}) > 1

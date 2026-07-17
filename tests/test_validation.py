@@ -103,10 +103,7 @@ def test_validate_add_job_margin_keeps_buffer(tmp_path, monkeypatch):
     # needed 100 <= 200*0.5 = 100 -> accepted (exactly 50% buffer).
     assert validate_add_job(src, dest, margin=0.5) == []
     # needed 100 > 200*0.4 = 80 -> rejected (only 40% buffer requested).
-    assert any(
-        "Not enough free space" in e
-        for e in validate_add_job(src, dest, margin=0.6)
-    )
+    assert any("Not enough free space" in e for e in validate_add_job(src, dest, margin=0.6))
 
 
 def test_estimate_source_bytes(tmp_path):

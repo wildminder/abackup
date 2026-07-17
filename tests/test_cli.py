@@ -1,7 +1,7 @@
 import pytest
 
 from abackup.cli import build_parser, main
-from abackup.config import save_settings, load_jobs, save_jobs
+from abackup.config import load_jobs, save_jobs, save_settings
 from abackup.models import BackupJob, Settings
 
 
@@ -58,7 +58,18 @@ def test_cli_workers_flag(tmp_config, tmp_data, sample_tree, tmp_path, monkeypat
 
     captured = {}
 
-    def fake_run(jobs, *, config_dir=None, data_dir=None, max_workers=4, on_job_done=None, clock=None, prefer_py7zr=None, seven_zip_compression_level=None):
+    def fake_run(
+        jobs,
+        *,
+        config_dir=None,
+        data_dir=None,
+        max_workers=4,
+        on_job_done=None,
+        clock=None,
+        prefer_py7zr=None,
+        seven_zip_compression_level=None,
+        **kwargs,
+    ):
         captured["max_workers"] = max_workers
         return []
 
@@ -81,7 +92,18 @@ def test_cli_run_all_passes_seven_zip_level(tmp_config, tmp_data, sample_tree, t
 
     captured = {}
 
-    def fake_run(jobs, *, config_dir=None, data_dir=None, max_workers=4, on_job_done=None, clock=None, prefer_py7zr=None, seven_zip_compression_level=None):
+    def fake_run(
+        jobs,
+        *,
+        config_dir=None,
+        data_dir=None,
+        max_workers=4,
+        on_job_done=None,
+        clock=None,
+        prefer_py7zr=None,
+        seven_zip_compression_level=None,
+        **kwargs,
+    ):
         captured["seven_zip_compression_level"] = seven_zip_compression_level
         return []
 
@@ -139,6 +161,7 @@ def test_cli_run_all_uses_config_dir_as_data_dir(tmp_config, sample_tree, tmp_pa
         clock=None,
         prefer_py7zr=None,
         seven_zip_compression_level=None,
+        **kwargs,
     ):
         captured["config_dir"] = config_dir
         captured["data_dir"] = data_dir
@@ -148,3 +171,74 @@ def test_cli_run_all_uses_config_dir_as_data_dir(tmp_config, sample_tree, tmp_pa
     main(["--run-all", "--config-dir", tmp_config])
     assert captured["config_dir"] == tmp_config
     assert captured["data_dir"] == tmp_config
+
+
+def test_cli_run_due_filters_by_schedule(tmp_config, tmp_data, sample_tree, tmp_path, monkeypatch):
+    """RM-01a: --run-due only runs jobs whose schedule is due."""
+    due = BackupJob(
+        source=str(sample_tree),
+        destination=str(tmp_path / "out_due"),
+        method="copy",
+        name="due",
+        schedule_interval_hours=1,
+        last_run_at="2026-01-01T00:00:00+00:00",
+    )
+    not_due = BackupJob(
+        source=str(sample_tree),
+        destination=str(tmp_path / "out_not"),
+        method="copy",
+        name="notdue",
+        schedule_interval_hours=24,
+        last_run_at="2026-01-01T11:00:00+00:00",
+    )
+    save_jobs([due, not_due], tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    captured = {}
+
+    def fake_run(jobs, **kwargs):
+        captured["ids"] = [j.id for j in jobs]
+        return []
+
+    monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
+    # Force a fixed "now" for the scheduler's due check.
+    import abackup.core.scheduler as sched_mod
+
+    monkeypatch.setattr(sched_mod, "is_due", lambda job, n=None: job.id == due.id)
+    main(["--run-due", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert captured["ids"] == [due.id]
+
+
+def test_cli_run_all_tag_filter(tmp_config, tmp_data, sample_tree, tmp_path, monkeypatch):
+    """RM-04: --tag only runs jobs with the matching tag."""
+    a = BackupJob(source=str(sample_tree), destination=str(tmp_path / "a"), method="copy", name="a", tag="docs")
+    b = BackupJob(source=str(sample_tree), destination=str(tmp_path / "b"), method="copy", name="b", tag="media")
+    save_jobs([a, b], tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    captured = {}
+
+    def fake_run(jobs, **kwargs):
+        captured["ids"] = [j.id for j in jobs]
+        return []
+
+    monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
+    main(["--run-all", "--tag", "docs", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert captured["ids"] == [a.id]
+
+
+def test_cli_run_all_dry_run_no_writes(tmp_config, tmp_data, sample_tree, tmp_path, monkeypatch):
+    """RM-05b: --dry-run forwards dry_run=True and writes nothing."""
+    jobs = [BackupJob(source=str(sample_tree), destination=str(tmp_path / "out"), method="copy", name="j")]
+    save_jobs(jobs, tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    captured = {}
+
+    def fake_run(jobs, **kwargs):
+        captured["dry_run"] = kwargs.get("dry_run")
+        return []
+
+    monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
+    main(["--run-all", "--dry-run", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert captured["dry_run"] is True

@@ -25,20 +25,57 @@ def test_sequential_order_max_workers_1(sample_tree, tmp_path, tmp_config, tmp_d
         _make_job(1, sample_tree, tmp_path / "d1"),
         _make_job(2, sample_tree, tmp_path / "d2"),
     ]
-    results = run_jobs_batch(
-        jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=1
-    )
+    results = run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=1)
     assert [r.job_id for r in results] == [j.id for j in jobs]
     assert all(r.status == "success" for r in results)
 
 
-def test_concurrent_all_complete(sample_tree, tmp_path, tmp_config, tmp_data):
+def test_runner_sequential_runs_in_order(sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch):
+    """RM-05a: run_mode='sequential' runs jobs in input order on the caller thread."""
+    import abackup.core.runner as runner_mod
+
+    order = []
+
+    def fake_run_job(job, **kwargs):
+        from abackup.core.backup import BackupResult
+
+        order.append(job.id)
+        return BackupResult(job.id, job.method.value, "success", {}, None, None, job)
+
+    monkeypatch.setattr(runner_mod, "run_job", fake_run_job)
     jobs = [
-        _make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(3)
+        _make_job(0, sample_tree, tmp_path / "d0"),
+        _make_job(1, sample_tree, tmp_path / "d1"),
+        _make_job(2, sample_tree, tmp_path / "d2"),
     ]
     results = run_jobs_batch(
-        jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=3
+        jobs, config_dir=tmp_config, data_dir=tmp_data, run_mode="sequential"
     )
+    assert order == [j.id for j in jobs]
+    assert [r.job_id for r in results] == [j.id for j in jobs]
+
+
+def test_runner_dry_run_passes_through(sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch):
+    """RM-05b: dry_run is forwarded to run_job."""
+    import abackup.core.runner as runner_mod
+
+    captured = {}
+
+    def fake_run_job(job, **kwargs):
+        from abackup.core.backup import BackupResult
+
+        captured.setdefault("dry_run", kwargs.get("dry_run"))
+        return BackupResult(job.id, job.method.value, "success", {}, None, None, job)
+
+    monkeypatch.setattr(runner_mod, "run_job", fake_run_job)
+    jobs = [_make_job(0, sample_tree, tmp_path / "d0")]
+    run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, dry_run=True)
+    assert captured["dry_run"] is True
+
+
+def test_concurrent_all_complete(sample_tree, tmp_path, tmp_config, tmp_data):
+    jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(3)]
+    results = run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=3)
     assert {r.job_id for r in results} == {j.id for j in jobs}
     assert all(r.status == "success" for r in results)
 
@@ -55,9 +92,7 @@ def test_failure_isolation(sample_tree, tmp_path, tmp_config, tmp_data):
         name="bad",
     )
     jobs = [good[0], bad, good[1]]
-    results = run_jobs_batch(
-        jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=2
-    )
+    results = run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=2)
     assert len(results) == 3
     by_id = {r.job_id: r for r in results}
     assert by_id[bad.id].status == "failed"
@@ -88,9 +123,7 @@ def test_per_job_status_persisted(sample_tree, tmp_path, tmp_config, tmp_data):
 
 def test_queue_backpressure_many_jobs(sample_tree, tmp_path, tmp_config, tmp_data):
     jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(20)]
-    results = run_jobs_batch(
-        jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=2
-    )
+    results = run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=2)
     assert len(results) == 20
     assert all(r.status == "success" for r in results)
 
@@ -111,13 +144,10 @@ def test_no_tmp_leftovers_after_batch(sample_tree, tmp_path, tmp_config, tmp_dat
     assert list(Path(tmp_config).glob("*.tmp")) == []
 
 
-def test_run_jobs_batch_passes_level_from_settings(
-    sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch
-):
+def test_run_jobs_batch_passes_level_from_settings(sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch):
+    import abackup.core.runner as runner_mod
     from abackup.config import save_settings
     from abackup.models import Settings
-
-    import abackup.core.runner as runner_mod
 
     save_settings(Settings(zip_compression_level=2), tmp_config)
     captured = []
@@ -135,6 +165,7 @@ def test_run_jobs_batch_passes_level_from_settings(
         cancel=None,
         prefer_py7zr=None,
         threads=None,
+        **kwargs,
     ):
         captured.append(zip_compression_level)
         return real_run_job(
@@ -154,13 +185,10 @@ def test_run_jobs_batch_passes_level_from_settings(
     assert captured == [2]
 
 
-def test_run_jobs_batch_explicit_level_overrides_settings(
-    sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch
-):
+def test_run_jobs_batch_explicit_level_overrides_settings(sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch):
+    import abackup.core.runner as runner_mod
     from abackup.config import save_settings
     from abackup.models import Settings
-
-    import abackup.core.runner as runner_mod
 
     save_settings(Settings(zip_compression_level=2), tmp_config)
     captured = []
@@ -178,6 +206,7 @@ def test_run_jobs_batch_explicit_level_overrides_settings(
         cancel=None,
         prefer_py7zr=None,
         threads=None,
+        **kwargs,
     ):
         captured.append(zip_compression_level)
         return real_run_job(
@@ -203,13 +232,10 @@ def test_run_jobs_batch_explicit_level_overrides_settings(
     assert captured == [7]
 
 
-def test_run_jobs_batch_passes_seven_zip_level_from_settings(
-    sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch
-):
+def test_run_jobs_batch_passes_seven_zip_level_from_settings(sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch):
+    import abackup.core.runner as runner_mod
     from abackup.config import save_settings
     from abackup.models import Settings
-
-    import abackup.core.runner as runner_mod
 
     save_settings(Settings(seven_zip_compression_level=4), tmp_config)
     captured = []
@@ -227,6 +253,7 @@ def test_run_jobs_batch_passes_seven_zip_level_from_settings(
         cancel=None,
         prefer_py7zr=None,
         threads=None,
+        **kwargs,
     ):
         captured.append(seven_zip_compression_level)
         return real_run_job(
@@ -249,10 +276,9 @@ def test_run_jobs_batch_passes_seven_zip_level_from_settings(
 def test_run_jobs_batch_explicit_seven_zip_level_overrides_settings(
     sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch
 ):
+    import abackup.core.runner as runner_mod
     from abackup.config import save_settings
     from abackup.models import Settings
-
-    import abackup.core.runner as runner_mod
 
     save_settings(Settings(seven_zip_compression_level=4), tmp_config)
     captured = []
@@ -270,6 +296,7 @@ def test_run_jobs_batch_explicit_seven_zip_level_overrides_settings(
         cancel=None,
         prefer_py7zr=None,
         threads=None,
+        **kwargs,
     ):
         captured.append(seven_zip_compression_level)
         return real_run_job(
@@ -299,18 +326,14 @@ def test_cancel_already_set_marks_all_cancelled(sample_tree, tmp_path, tmp_confi
     jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(3)]
     cancel = threading.Event()
     cancel.set()
-    results = run_jobs_batch(
-        jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=2, cancel=cancel
-    )
+    results = run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=2, cancel=cancel)
     assert len(results) == 3
     assert all(r.status == "cancelled" for r in results)
     # Cancelled jobs must not have written any output.
     assert not (tmp_path / "d0").exists()
 
 
-def test_cancel_after_first_job_cancels_the_rest(
-    sample_tree, tmp_path, tmp_config, tmp_data
-):
+def test_cancel_after_first_job_cancels_the_rest(sample_tree, tmp_path, tmp_config, tmp_data):
     jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(3)]
     cancel = threading.Event()
     seen = []
@@ -338,9 +361,7 @@ def test_cancel_after_first_job_cancels_the_rest(
     assert not (tmp_path / "d1").exists()
 
 
-def test_run_jobs_batch_emits_per_job_progress(
-    sample_tree, tmp_path, tmp_config, tmp_data
-):
+def test_run_jobs_batch_emits_per_job_progress(sample_tree, tmp_path, tmp_config, tmp_data):
     jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(2)]
     seen = []
     run_jobs_batch(
@@ -360,9 +381,7 @@ def test_run_jobs_batch_emits_per_job_progress(
         assert seq[-1].percent() == 100
 
 
-def test_run_jobs_batch_cancel_emits_cancelled(
-    sample_tree, tmp_path, tmp_config, tmp_data
-):
+def test_run_jobs_batch_cancel_emits_cancelled(sample_tree, tmp_path, tmp_config, tmp_data):
     jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(3)]
     cancel = threading.Event()
     cancel.set()
@@ -379,9 +398,7 @@ def test_run_jobs_batch_cancel_emits_cancelled(
     assert all(p.status == "cancelled" for _, p in seen)
 
 
-def test_run_jobs_batch_caps_7z_threads_when_concurrent(
-    sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch
-):
+def test_run_jobs_batch_caps_7z_threads_when_concurrent(sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch):
     # NTH-005: with max_workers>1 the batch must cap 7z threads so concurrent
     # jobs don't oversubscribe the CPU.
     import os
@@ -403,6 +420,7 @@ def test_run_jobs_batch_caps_7z_threads_when_concurrent(
         prefer_py7zr=None,
         threads=None,
         cancel=None,
+        **kwargs,
     ):
         captured.append(threads)
         return real_run_job(
@@ -426,9 +444,7 @@ def test_run_jobs_batch_caps_7z_threads_when_concurrent(
     assert captured == [expected] * 4
 
 
-def test_run_jobs_batch_single_worker_uses_no_thread_cap(
-    sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch
-):
+def test_run_jobs_batch_single_worker_uses_no_thread_cap(sample_tree, tmp_path, tmp_config, tmp_data, monkeypatch):
     # Single-worker runs keep threads=None so 7z uses all cores (fast path).
     import abackup.core.runner as runner_mod
 
@@ -447,6 +463,7 @@ def test_run_jobs_batch_single_worker_uses_no_thread_cap(
         prefer_py7zr=None,
         threads=None,
         cancel=None,
+        **kwargs,
     ):
         captured.append(threads)
         return real_run_job(

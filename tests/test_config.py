@@ -1,14 +1,14 @@
 import json
 
 from abackup.config import (
-    load_settings,
-    save_settings,
-    load_jobs,
-    save_jobs,
     init_storage,
-    relocate_storage,
-    relocate_data,
+    load_jobs,
+    load_settings,
     maybe_migrate_legacy_config,
+    relocate_data,
+    relocate_storage,
+    save_jobs,
+    save_settings,
 )
 from abackup.models import BackupJob, Settings
 from abackup.utils.errors import ConfigError
@@ -48,9 +48,7 @@ def test_load_jobs_missing_returns_empty(tmp_config):
 
 def test_init_storage_creates_defaults(tmp_config):
     init_storage(tmp_config)
-    data = json.loads(
-        (__import__("pathlib").Path(tmp_config) / "settings.json").read_text()
-    )
+    data = json.loads((__import__("pathlib").Path(tmp_config) / "settings.json").read_text())
     assert data["schema_version"] == 1
     assert data["max_workers"] == 4
 

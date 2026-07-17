@@ -5,16 +5,17 @@ from __future__ import annotations
 import os
 import tempfile
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from abackup.core.constants import CHUNK
+from abackup.core.filters import should_skip
 from abackup.core.progress import (
-    Progress,
     PHASE_COPYING,
     OptionalProgressCallback,
+    Progress,
 )
-from abackup.utils.errors import SourceNotFound, DestinationError, JobCancelled
+from abackup.utils.errors import DestinationError, JobCancelled, SourceNotFound
 
 # Signature of the per-file progress emitter passed into _atomic_copy_file.
 # It receives (bytes_copied_in_current_file, current_relative_path) and the
@@ -69,8 +70,8 @@ def _atomic_copy_file(
 
 
 def _files_equal(
-    s_stat: "os.stat_result",
-    t_stat: "os.stat_result",
+    s_stat: os.stat_result,
+    t_stat: os.stat_result,
     src: Path,
     tgt: Path,
     *,
@@ -109,6 +110,9 @@ def copy_tree(
     overwrite: bool = True,
     use_hash: bool = False,
     cancel=None,
+    exclude_patterns: list[str] | None = None,
+    include_patterns: list[str] | None = None,
+    plan_only: bool = False,
 ) -> dict:
     """Mirror ``source`` into ``destination``.
 
@@ -122,6 +126,11 @@ def copy_tree(
     If ``cancel`` (a ``threading.Event``) is set, raises ``JobCancelled`` before
     the next file (and mid-file for the in-progress copy) so a batch can be
     aborted promptly.
+
+    ``exclude_patterns`` / ``include_patterns`` are glob lists applied to each
+    file's relative path (see :func:`abackup.core.filters.should_skip`). When
+    ``plan_only`` is True, no files are written and the summary reports what
+    *would* be copied (used by dry-run mode).
     """
     if cancel is not None and cancel.is_set():
         raise JobCancelled("Copy cancelled")
@@ -129,17 +138,24 @@ def copy_tree(
     dst = Path(destination)
     if not src.exists() or not src.is_dir():
         raise SourceNotFound(f"Source directory not found: {src}")
-    try:
-        dst.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise DestinationError(f"Cannot create destination {dst}: {exc}") from exc
+    if not plan_only:
+        try:
+            dst.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise DestinationError(f"Cannot create destination {dst}: {exc}") from exc
+
+    exclude_patterns = exclude_patterns or []
+    include_patterns = include_patterns or []
 
     files = list(_iter_files(src))
-    total = len(files)
-    bytes_total = sum(f.stat().st_size for f in files)
+    # Apply include/exclude filters (pure, deterministic).
+    planned = [f for f in files if not should_skip(f.relative_to(src), exclude_patterns, include_patterns)]
+    total = len(planned)
+    bytes_total = sum(f.stat().st_size for f in planned)
     copied = 0
     skipped = 0
     bytes_copied = 0
+    excluded = len(files) - total
 
     def emit(local_bytes: int, current_file: str) -> None:
         if on_progress is not None:
@@ -158,8 +174,21 @@ def copy_tree(
     if on_progress is not None:
         emit(0, "")
 
+    if plan_only:
+        # Dry-run: report the plan without touching the destination.
+        return {
+            "files_total": total,
+            "files_copied": 0,
+            "files_skipped": 0,
+            "files_failed": 0,
+            "failed_files": [],
+            "files_excluded": excluded,
+            "bytes_copied": 0,
+            "planned": True,
+        }
+
     failed_files: list[dict] = []
-    for f in files:
+    for f in planned:
         if cancel is not None and cancel.is_set():
             raise JobCancelled("Copy cancelled")
         rel = f.relative_to(src)
@@ -200,5 +229,6 @@ def copy_tree(
         "files_skipped": skipped,
         "files_failed": len(failed_files),
         "failed_files": failed_files,
+        "files_excluded": excluded,
         "bytes_copied": bytes_copied,
     }

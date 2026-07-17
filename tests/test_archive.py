@@ -3,7 +3,7 @@ from datetime import date
 from zipfile import ZipFile
 
 from abackup.core.archive import make_zip
-from abackup.utils.errors import SourceNotFound, DestinationError, JobCancelled
+from abackup.utils.errors import DestinationError, JobCancelled, SourceNotFound
 
 
 def test_make_zip_name_and_contents(sample_tree, dest_dir):
@@ -25,6 +25,22 @@ def test_make_zip_no_overwrite_same_day(sample_tree, dest_dir):
     # Both archives are valid and independent.
     assert ZipFile(first).namelist()
     assert ZipFile(second).namelist()
+
+
+def test_make_zip_skips_excluded(sample_tree, dest_dir):
+    (sample_tree / "b.txt.tmp").write_text("junk", encoding="utf-8")
+    out = make_zip(sample_tree, dest_dir, when=date(2026, 7, 12), exclude_patterns=["*.tmp"])
+    with ZipFile(out) as zf:
+        names = zf.namelist()
+    assert "b.txt.tmp" not in names
+    assert "b.txt" in names
+
+
+def test_make_zip_plan_only_no_archive(sample_tree, dest_dir):
+    out = make_zip(sample_tree, dest_dir, when=date(2026, 7, 12), plan_only=True)
+    # plan_only returns the would-be name but writes nothing.
+    assert out.name == "source_2026-07-12.zip"
+    assert not out.exists()
 
 
 def test_make_zip_deterministic(sample_tree, dest_dir):
@@ -59,22 +75,14 @@ def test_make_zip_bad_destination_raises(sample_tree, tmp_path):
 def test_make_zip_level_store_larger_than_max(sample_tree, dest_dir):
     # Highly compressible content isolates the effect of the level.
     (sample_tree / "big.txt").write_text("A" * 100_000, encoding="utf-8")
-    store = make_zip(
-        sample_tree, dest_dir / "store", when=date(2026, 7, 12), compress_level=0
-    )
-    maxed = make_zip(
-        sample_tree, dest_dir / "max", when=date(2026, 7, 12), compress_level=9
-    )
+    store = make_zip(sample_tree, dest_dir / "store", when=date(2026, 7, 12), compress_level=0)
+    maxed = make_zip(sample_tree, dest_dir / "max", when=date(2026, 7, 12), compress_level=9)
     assert store.stat().st_size > maxed.stat().st_size
 
 
 def test_make_zip_level_is_deterministic(sample_tree, dest_dir):
-    a = make_zip(
-        sample_tree, dest_dir / "a", when=date(2026, 7, 12), compress_level=9
-    )
-    b = make_zip(
-        sample_tree, dest_dir / "b", when=date(2026, 7, 12), compress_level=9
-    )
+    a = make_zip(sample_tree, dest_dir / "a", when=date(2026, 7, 12), compress_level=9)
+    b = make_zip(sample_tree, dest_dir / "b", when=date(2026, 7, 12), compress_level=9)
     assert a.read_bytes() == b.read_bytes()
 
 
@@ -185,3 +193,38 @@ def test_make_zip_cancel_stops_progress(sample_tree, dest_dir, monkeypatch):
         raise AssertionError("expected JobCancelled")
     assert seen
     assert seen[-1].bytes_done < seen[-1].bytes_total
+
+
+def test_make_zip_streams_large_file(sample_tree, dest_dir, monkeypatch):
+    """IMP-102: a large file is written to the zip in bounded CHUNK-sized
+    increments (no unbounded in-RAM bytearray buffer during the read)."""
+    import tempfile
+
+    # One file of 5 MiB (5 * CHUNK).
+    (sample_tree / "big.bin").write_bytes(b"X" * (5 * 1024 * 1024))
+
+    peak_write = {"bytes": 0}
+
+    real_spool_write = tempfile.SpooledTemporaryFile.write
+
+    def spy_spool_write(self, data):
+        if isinstance(data, (bytes, bytearray, memoryview)):
+            peak_write["bytes"] = max(peak_write["bytes"], len(data))
+        return real_spool_write(self, data)
+
+    monkeypatch.setattr(tempfile.SpooledTemporaryFile, "write", spy_spool_write)
+    make_zip(sample_tree, dest_dir, when=date(2026, 7, 12))
+    # Each incremental write to the spool must be bounded by CHUNK, proving the
+    # source is streamed rather than buffered whole in memory.
+    assert peak_write["bytes"] <= 1024 * 1024, f"peak spool write {peak_write['bytes']}"
+
+
+def test_make_zip_byte_reproducible(sample_tree, dest_dir):
+    """IMP-102: streaming rewrite must remain byte-for-byte reproducible."""
+    (sample_tree / "big.txt").write_text("A" * 50_000, encoding="utf-8")
+    a = make_zip(sample_tree, dest_dir / "a", when=date(2026, 7, 12), compress_level=6)
+    b = make_zip(sample_tree, dest_dir / "b", when=date(2026, 7, 12), compress_level=6)
+    assert a.read_bytes() == b.read_bytes()
+    # And it still extracts to the original content.
+    with ZipFile(a) as zf:
+        assert zf.read("big.txt") == b"A" * 50_000

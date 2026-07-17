@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-
 from textual.containers import Horizontal
 from textual.screen import Screen
-from textual.widgets import ListView, ListItem, Label, Button, Header, Footer, Static
+from textual.widgets import Button, Footer, Header, Label, ListItem, ListView, Static
 
 from abackup.config import load_jobs, save_jobs
 from abackup.core.jobs import remove_job
@@ -62,15 +61,7 @@ class MainMenuScreen(Screen):
         list_view = self.query_one("#jobs", ListView)
         list_view.clear()
         for j in jobs:
-            list_view.append(
-                ListItem(
-                    Label(
-                        format_job_label(
-                            j.name, j.method.value, j.source, j.destination
-                        )
-                    )
-                )
-            )
+            list_view.append(ListItem(Label(format_job_label(j.name, j.method.value, j.source, j.destination))))
         status = self.query_one("#status", Static)
         status.update("No jobs yet. Add one." if not jobs else "")
 

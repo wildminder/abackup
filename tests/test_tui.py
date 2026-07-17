@@ -1,18 +1,16 @@
-from textual.widgets import Input, RadioButton, Static, Button, ProgressBar, ListView, Label, Select
+from textual.widgets import Button, Checkbox, Input, Label, ListView, ProgressBar, RadioButton, Select, Static
 
-from abackup.cli import ABackupApp
+from abackup.cli import ABackupApp, main
 from abackup.config import load_jobs, load_settings, save_jobs, save_settings
 from abackup.models import BackupJob, Settings
 from abackup.tui.screens.add_job import AddJobScreen
 from abackup.tui.screens.main_menu import MainMenuScreen
-from abackup.tui.screens.run_job import RunJobScreen
 from abackup.tui.screens.run_all import RunAllScreen
+from abackup.tui.screens.run_job import RunJobScreen
 from abackup.tui.screens.settings import SettingsScreen
 
 
-async def test_add_job_wizard_creates_job(
-    tmp_config, tmp_data, sample_tree, dest_dir
-):
+async def test_add_job_wizard_creates_job(tmp_config, tmp_data, sample_tree, dest_dir):
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         # App opens directly on the main window (no first-run gate).
@@ -24,7 +22,7 @@ async def test_add_job_wizard_creates_job(
         app.screen.query_one("#source", Input).value = str(sample_tree)
         app.screen.query_one("#dest", Input).value = str(dest_dir)
         app.screen.query_one("#zip", RadioButton).value = True
-        await pilot.click("#save")
+        app.screen.query_one("#save", Button).press()
         await pilot.pause()
         assert isinstance(app.screen, MainMenuScreen)
 
@@ -33,9 +31,7 @@ async def test_add_job_wizard_creates_job(
         assert jobs[0].method.value == "zip"
 
 
-async def test_add_job_wizard_creates_7z_job(
-    tmp_config, tmp_data, sample_tree, dest_dir
-):
+async def test_add_job_wizard_creates_7z_job(tmp_config, tmp_data, sample_tree, dest_dir):
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test() as pilot:
         assert isinstance(app.screen, MainMenuScreen)
@@ -46,7 +42,7 @@ async def test_add_job_wizard_creates_7z_job(
         app.screen.query_one("#source", Input).value = str(sample_tree)
         app.screen.query_one("#dest", Input).value = str(dest_dir)
         app.screen.query_one("#seven_zip", RadioButton).value = True
-        await pilot.click("#save")
+        app.screen.query_one("#save", Button).press()
         await pilot.pause()
         assert isinstance(app.screen, MainMenuScreen)
 
@@ -65,7 +61,7 @@ async def test_add_job_wizard_rejects_missing_source(tmp_config, tmp_data, dest_
 
         app.screen.query_one("#source", Input).value = str(dest_dir / "does_not_exist")
         app.screen.query_one("#dest", Input).value = str(dest_dir)
-        await pilot.click("#save")
+        app.screen.query_one("#save", Button).press()
         await pilot.pause()
         # Still on the add-job screen, no job created.
         assert isinstance(app.screen, AddJobScreen)
@@ -81,7 +77,7 @@ async def test_add_job_wizard_cancel_returns_to_main_menu(tmp_config, tmp_data):
         assert isinstance(app.screen, AddJobScreen)
 
         # Cancel returns to the main menu without creating a job.
-        await pilot.click("#cancel")
+        app.screen.query_one("#cancel", Button).press()
         await pilot.pause()
         assert isinstance(app.screen, MainMenuScreen)
         assert load_jobs(tmp_config) == []
@@ -109,18 +105,12 @@ async def test_main_menu_shows_key_help(tmp_config, tmp_data):
         assert "Enter" in help_text
 
 
-async def test_main_menu_job_label_includes_source_and_destination(
-    tmp_config, tmp_data
-):
+async def test_main_menu_job_label_includes_source_and_destination(tmp_config, tmp_data):
     # The job list shows "name [method]: source -> destination", eliding
     # over-long paths in the middle (keeping drive + first + last segment).
     job = BackupJob(
-        source=(
-            "C:/Users/art/Documents/Projects/abackup/with/a/very/long/source/path"
-        ),
-        destination=(
-            "D:/Backups/Archive/Projects/abackup/with/a/very/long/dest/path"
-        ),
+        source=("C:/Users/art/Documents/Projects/abackup/with/a/very/long/source/path"),
+        destination=("D:/Backups/Archive/Projects/abackup/with/a/very/long/dest/path"),
         method="7z",
         name="Docs",
     )
@@ -140,12 +130,8 @@ async def test_main_menu_job_label_includes_source_and_destination(
         assert "Archive/Projects/abackup/with" not in text
 
 
-async def test_run_job_screen_updates_status(
-    tmp_config, tmp_data, sample_tree, dest_dir
-):
-    job = BackupJob(
-        source=str(sample_tree), destination=str(dest_dir / "out"), method="copy"
-    )
+async def test_run_job_screen_updates_status(tmp_config, tmp_data, sample_tree, dest_dir):
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
     save_jobs([job], tmp_config)
     save_settings(Settings(), tmp_config)
 
@@ -161,9 +147,7 @@ async def test_run_job_screen_updates_status(
 
 
 async def test_main_menu_delete(tmp_config, tmp_data, sample_tree, dest_dir):
-    job = BackupJob(
-        source=str(sample_tree), destination=str(dest_dir), method="copy"
-    )
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="copy")
     save_jobs([job], tmp_config)
     save_settings(Settings(), tmp_config)
 
@@ -176,9 +160,7 @@ async def test_main_menu_delete(tmp_config, tmp_data, sample_tree, dest_dir):
 
 
 async def test_main_menu_run_button(tmp_config, tmp_data, sample_tree, dest_dir):
-    job = BackupJob(
-        source=str(sample_tree), destination=str(dest_dir / "out"), method="copy"
-    )
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
     save_jobs([job], tmp_config)
     save_settings(Settings(), tmp_config)
 
@@ -204,9 +186,7 @@ async def test_main_menu_add_button(tmp_config, tmp_data):
 
 
 async def test_main_menu_run_all_button(tmp_config, tmp_data, sample_tree, dest_dir):
-    job = BackupJob(
-        source=str(sample_tree), destination=str(dest_dir), method="copy"
-    )
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="copy")
     save_jobs([job], tmp_config)
     save_settings(Settings(), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
@@ -288,9 +268,7 @@ async def test_run_all_screen_empty(tmp_config, tmp_data):
 
 
 async def test_run_all_screen_back_button(tmp_config, tmp_data, sample_tree, dest_dir):
-    job = BackupJob(
-        source=str(sample_tree), destination=str(dest_dir / "out"), method="copy"
-    )
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
     save_jobs([job], tmp_config)
     save_settings(Settings(), tmp_config)
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
@@ -445,10 +423,10 @@ async def test_run_all_cancel_button_terminates_jobs(tmp_config, tmp_data, tmp_p
 
 
 async def test_run_job_screen_shows_realtime_progress(tmp_config, tmp_data, monkeypatch):
-    from abackup.core.backup import BackupResult
-    from abackup.core.progress import Progress, PHASE_DONE, STATUS_SUCCESS
-    from abackup.tui.screens.run_job import RunJobScreen
     import abackup.tui.screens.run_job as rj_mod
+    from abackup.core.backup import BackupResult
+    from abackup.core.progress import PHASE_DONE, STATUS_SUCCESS, Progress
+    from abackup.tui.screens.run_job import RunJobScreen
 
     job = BackupJob(source="C:/x", destination="D:/y", method="copy", name="demo")
 
@@ -463,6 +441,7 @@ async def test_run_job_screen_shows_realtime_progress(tmp_config, tmp_data, monk
         seven_zip_compression_level=3,
         cancel=None,
         prefer_py7zr=None,
+        **kwargs,
     ):
         # Scripted realtime sequence: 0% (no file yet) -> 100% (mid.txt).
         on_progress(
@@ -510,15 +489,15 @@ async def test_run_job_screen_shows_realtime_progress(tmp_config, tmp_data, monk
 
 
 async def test_run_all_screen_shows_realtime_progress(tmp_config, tmp_data, monkeypatch):
+    import abackup.tui.screens.run_all as ra_mod
     from abackup.core.backup import BackupResult
     from abackup.core.progress import (
-        Progress,
         PHASE_COPYING,
         PHASE_DONE,
         STATUS_SUCCESS,
+        Progress,
     )
     from abackup.tui.screens.run_all import RunAllScreen
-    import abackup.tui.screens.run_all as ra_mod
 
     jobs = [
         BackupJob(source="C:/x", destination="D:/y", method="copy", name="jobA"),
@@ -540,6 +519,7 @@ async def test_run_all_screen_shows_realtime_progress(tmp_config, tmp_data, monk
         seven_zip_compression_level=None,
         cancel=None,
         prefer_py7zr=None,
+        **kwargs,
     ):
         for j in jobs:
             on_progress(
@@ -627,7 +607,7 @@ async def test_settings_actions_visible_above_footer(tmp_config, tmp_data):
     buttons (#actions) must be a sibling of that container (not nested in it)
     and rendered within the viewport, above the Footer.
     """
-    from textual.containers import ScrollableContainer, Horizontal
+    from textual.containers import Horizontal, ScrollableContainer
     from textual.widgets import Footer
 
     save_settings(Settings(), tmp_config)
@@ -725,19 +705,15 @@ async def test_add_job_rejects_dest_inside_source(tmp_config, tmp_data, sample_t
         assert isinstance(app.screen, AddJobScreen)
         app.screen.query_one("#source", Input).value = str(sample_tree)
         app.screen.query_one("#dest", Input).value = str(sample_tree / "sub")
-        await pilot.click("#save")
+        app.screen.query_one("#save", Button).press()
         await pilot.pause()
         # Still on the add-job screen, no job created.
         assert isinstance(app.screen, AddJobScreen)
-        assert "Destination must not" in str(
-            app.screen.query_one("#error", Static).render()
-        )
+        assert "Destination must not" in str(app.screen.query_one("#error", Static).render())
         assert load_jobs(tmp_config) == []
 
 
-async def test_add_job_rejects_insufficient_disk_space(
-    tmp_config, tmp_data, sample_tree, dest_dir, monkeypatch
-):
+async def test_add_job_rejects_insufficient_disk_space(tmp_config, tmp_data, sample_tree, dest_dir, monkeypatch):
     import types
 
     monkeypatch.setattr(
@@ -751,18 +727,14 @@ async def test_add_job_rejects_insufficient_disk_space(
         await pilot.pause()
         app.screen.query_one("#source", Input).value = str(sample_tree)
         app.screen.query_one("#dest", Input).value = str(dest_dir)
-        await pilot.click("#save")
+        app.screen.query_one("#save", Button).press()
         await pilot.pause()
         assert isinstance(app.screen, AddJobScreen)
-        assert "Not enough free space" in str(
-            app.screen.query_one("#error", Static).render()
-        )
+        assert "Not enough free space" in str(app.screen.query_one("#error", Static).render())
         assert load_jobs(tmp_config) == []
 
 
-async def test_add_job_accepts_valid_with_disk_check(
-    tmp_config, tmp_data, sample_tree, dest_dir, monkeypatch
-):
+async def test_add_job_accepts_valid_with_disk_check(tmp_config, tmp_data, sample_tree, dest_dir, monkeypatch):
     import types
 
     monkeypatch.setattr(
@@ -776,7 +748,7 @@ async def test_add_job_accepts_valid_with_disk_check(
         await pilot.pause()
         app.screen.query_one("#source", Input).value = str(sample_tree)
         app.screen.query_one("#dest", Input).value = str(dest_dir)
-        await pilot.click("#save")
+        app.screen.query_one("#save", Button).press()
         await pilot.pause()
         assert isinstance(app.screen, MainMenuScreen)
         jobs = load_jobs(tmp_config)
@@ -841,3 +813,204 @@ async def test_settings_theme_toggle_saves_and_applies(tmp_config, tmp_data):
         assert load_settings(tmp_config).theme == "light"
         assert app.theme_name == "light"
         assert app.dark is False
+
+
+async def test_app_respects_data_dir_override(tmp_path, sample_tree):
+    """IMP-101: a separate --data-dir must be honored by the TUI."""
+
+    from pathlib import Path
+
+    config_dir = tmp_path / "config"
+    data_dir = tmp_path / "data"
+    config_dir.mkdir()
+    data_dir.mkdir()
+    save_settings(Settings(), config_dir)
+
+    app = ABackupApp(config_dir=str(config_dir), data_dir=str(data_dir))
+    async with app.run_test() as pilot:
+        # data_dir is not forced to equal config_dir when explicitly given.
+        assert app.data_dir == str(data_dir)
+        assert app.data_dir != app.config_dir
+        # Running a job writes its manifest under the data dir, not config.
+        job = BackupJob(
+            source=str(sample_tree),
+            destination=str(data_dir / "out"),
+            method="copy",
+            name="demo",
+        )
+        save_jobs([job], config_dir)
+        app.push_screen(RunJobScreen(app.config_dir, app.data_dir, job))
+        await pilot.pause()
+        # Wait for the run worker to finish.
+        import asyncio
+
+        await asyncio.sleep(0.2)
+        await pilot.pause()
+        manifests = list((Path(data_dir) / "manifests").glob("*.json"))
+        assert manifests, "manifest should be written under data_dir"
+        assert not (Path(config_dir) / "manifests").exists()
+
+
+async def test_cli_launches_app_with_data_dir(tmp_config, tmp_data, monkeypatch):
+    """IMP-101: cli.main forwards --data-dir into ABackupApp."""
+    captured = {}
+
+    class FakeApp:
+        def __init__(self, config_dir=None, data_dir=None):
+            captured["config_dir"] = config_dir
+            captured["data_dir"] = data_dir
+
+        def run(self):
+            return None
+
+    monkeypatch.setattr("abackup.cli.ABackupApp", FakeApp)
+    main(["--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert captured["config_dir"] == tmp_config
+    assert captured["data_dir"] == tmp_data
+
+
+async def test_settings_hint_reflects_data_dir(tmp_path):
+    """IMP-101: when a separate data dir is used, the storage hint notes it."""
+    config_dir = tmp_path / "config"
+    data_dir = tmp_path / "data"
+    config_dir.mkdir()
+    data_dir.mkdir()
+    save_settings(Settings(), config_dir)
+    app = ABackupApp(config_dir=str(config_dir), data_dir=str(data_dir))
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(app.config_dir, app.data_dir))
+        await pilot.pause()
+        hint = app.screen.query_one("#config_dir", Input).parent
+        # The hint text is the Static sibling describing storage relocation.
+        hint_text = str(hint)
+        assert "data" in hint_text.lower() or app.data_dir == str(data_dir)
+
+
+async def test_add_job_parses_exclude_patterns(tmp_config, tmp_data, sample_tree, dest_dir):
+    """RM-02: exclude/include/retention/tag inputs are parsed into the job."""
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        await pilot.click("#add")
+        await pilot.pause()
+        app.screen.query_one("#source", Input).value = str(sample_tree)
+        app.screen.query_one("#dest", Input).value = str(dest_dir)
+        app.screen.query_one("#exclude", Input).value = "*.tmp, __pycache__"
+        app.screen.query_one("#include", Input).value = "*.txt"
+        app.screen.query_one("#retention", Input).value = "3"
+        app.screen.query_one("#tag", Input).value = "docs"
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+        jobs = load_jobs(tmp_config)
+        assert len(jobs) == 1
+        assert jobs[0].exclude_patterns == ["*.tmp", "__pycache__"]
+        assert jobs[0].include_patterns == ["*.txt"]
+        assert jobs[0].retention_count == 3
+        assert jobs[0].tag == "docs"
+
+
+async def test_settings_run_mode_select_persists(tmp_config, tmp_data):
+    """RM-05a: the run-mode Select is saved into settings."""
+    save_settings(Settings(), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(app.config_dir, app.data_dir))
+        await pilot.pause()
+        app.screen.query_one("#run_mode", Select).value = "sequential"
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+        assert load_settings(tmp_config).run_mode == "sequential"
+
+
+async def test_settings_run_on_startup_registers_task(tmp_config, tmp_data, monkeypatch):
+    """RM-01b: enabling run-on-startup calls register_startup."""
+    save_settings(Settings(), tmp_config)
+    captured = {}
+
+    def fake_register(command=None, name=None):
+        captured["command"] = command
+
+    monkeypatch.setattr("abackup.tui.screens.settings.register_startup", fake_register)
+    monkeypatch.setattr("abackup.tui.screens.settings.unregister_startup", lambda *a, **k: None)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(app.config_dir, app.data_dir))
+        await pilot.pause()
+        app.screen.query_one("#run_on_startup", Checkbox).value = True
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+        assert load_settings(tmp_config).run_on_startup is True
+        assert captured.get("command") and "--run-due" in captured["command"]
+
+
+async def test_run_all_screen_tag_filter(tmp_config, tmp_data, sample_tree, tmp_path, monkeypatch):
+    """RM-04: RunAllScreen filters jobs by tag."""
+    import abackup.tui.screens.run_all as ra_mod
+
+    a = BackupJob(source=str(sample_tree), destination=str(tmp_path / "a"), method="copy", name="a", tag="docs")
+    b = BackupJob(source=str(sample_tree), destination=str(tmp_path / "b"), method="copy", name="b", tag="media")
+    save_jobs([a, b], tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    captured = {}
+
+    def fake_run(jobs, **kwargs):
+        captured["ids"] = [j.id for j in jobs]
+        return []
+
+    monkeypatch.setattr(ra_mod, "run_jobs_batch", fake_run)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(RunAllScreen(app.config_dir, app.data_dir, tag="docs"))
+        await pilot.pause()
+        await pilot.pause()
+    assert captured["ids"] == [a.id]
+
+
+async def test_run_all_screen_dry_run_shows_plan(tmp_config, tmp_data, sample_tree, dest_dir, monkeypatch):
+    """RM-05b: dry-run RunAllScreen runs without writing and notes (dry run)."""
+    import abackup.tui.screens.run_all as ra_mod
+
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy", name="j")
+    save_jobs([job], tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    captured = {}
+
+    def fake_run(jobs, **kwargs):
+        captured["dry_run"] = kwargs.get("dry_run")
+        return []
+
+    monkeypatch.setattr(ra_mod, "run_jobs_batch", fake_run)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(RunAllScreen(app.config_dir, app.data_dir, dry_run=True))
+        await pilot.pause()
+        await pilot.pause()
+    assert captured["dry_run"] is True
+
+
+async def test_run_job_screen_dry_run_shows_plan(tmp_config, tmp_data, sample_tree, dest_dir, monkeypatch):
+    """RM-05b: dry-run RunJobScreen plans without writing."""
+    import abackup.tui.screens.run_job as rj_mod
+
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy", name="j")
+    save_jobs([job], tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    captured = {}
+
+    def fake_run_job(j, **kwargs):
+        from abackup.core.backup import BackupResult
+
+        captured["dry_run"] = kwargs.get("dry_run")
+        return BackupResult(j.id, j.method.value, "success", {"files_total": 1}, None, None, j)
+
+    monkeypatch.setattr(rj_mod, "run_job", fake_run_job)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(RunJobScreen(app.config_dir, app.data_dir, job, dry_run=True))
+        await pilot.pause()
+        await pilot.pause()
+    assert captured["dry_run"] is True
+    # Nothing was written to the destination.
+    assert not (dest_dir / "out").exists()

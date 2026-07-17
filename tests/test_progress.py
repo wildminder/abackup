@@ -1,10 +1,10 @@
+from dataclasses import FrozenInstanceError
+
 from abackup.core.progress import (
-    Progress,
     PHASE_DONE,
     STATUS_SUCCESS,
+    Progress,
 )
-
-from dataclasses import FrozenInstanceError
 
 
 def test_fraction_zero_at_start():

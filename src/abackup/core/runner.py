@@ -5,14 +5,14 @@ from __future__ import annotations
 import os
 import queue
 import threading
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
-from abackup.config import load_jobs, save_jobs, load_settings
+from abackup.config import load_jobs, load_settings, save_jobs
 from abackup.core.backup import BackupResult, run_job
 from abackup.core.jobs import upsert_job
-from abackup.core.progress import Progress, PHASE_CANCELLED, STATUS_CANCELLED
+from abackup.core.progress import PHASE_CANCELLED, STATUS_CANCELLED, Progress
 from abackup.models import BackupJob
 
 # Signature: on_job_done(job_id, result)
@@ -25,9 +25,7 @@ ClockFn = Callable[[], datetime]
 
 def _cancelled_result(job: BackupJob, clock: ClockFn) -> BackupResult:
     """Build a 'cancelled' result (with an updated job) for a job that did not run."""
-    updated = BackupJob(
-        **{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "cancelled"}
-    )
+    updated = BackupJob(**{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "cancelled"})
     return BackupResult(job.id, job.method.value, "cancelled", {}, None, "cancelled", updated)
 
 
@@ -44,8 +42,10 @@ def run_jobs_batch(
     seven_zip_compression_level: int | None = None,
     prefer_py7zr: bool | None = None,
     cancel: threading.Event | None = None,
+    run_mode: str | None = None,
+    dry_run: bool = False,
 ) -> list[BackupResult]:
-    """Run every job concurrently using a bounded worker-thread pool + queue.
+    """Run every job using a bounded worker-thread pool + queue (or sequentially).
 
     Jobs are enqueued and consumed by ``min(max_workers, len(jobs))`` worker
     threads (at least one). Each worker persists its own ``updated_job`` under a
@@ -55,22 +55,74 @@ def run_jobs_batch(
     If ``cancel`` (a ``threading.Event``) is set, queued-but-not-started jobs are
     marked ``cancelled`` and in-flight jobs abort at the next cancellation check
     inside the copy/zip routines.
+
+    When ``run_mode == "sequential"`` (or ``max_workers == 1``), jobs run one by
+    one in input order on the calling thread (no worker pool). When ``dry_run``
+    is True, jobs are planned but not written.
     """
     if not jobs:
         return []
 
     if clock is None:
         clock = datetime.now
+    settings = load_settings(config_dir)
     if zip_compression_level is None:
-        zip_compression_level = load_settings(config_dir).zip_compression_level
+        zip_compression_level = settings.zip_compression_level
     if prefer_py7zr is None:
-        prefer_py7zr = load_settings(config_dir).prefer_py7zr
+        prefer_py7zr = settings.prefer_py7zr
     if seven_zip_compression_level is None:
-        seven_zip_compression_level = load_settings(config_dir).seven_zip_compression_level
+        seven_zip_compression_level = settings.seven_zip_compression_level
+    if run_mode is None:
+        run_mode = settings.run_mode
 
     order = [j.id for j in jobs]
     results: dict[str, BackupResult] = {}
-    q: "queue.Queue[BackupJob | None]" = queue.Queue()
+    lock = threading.Lock()
+
+    # Cap 7z threads so concurrent 7z jobs don't oversubscribe the CPU (NTH-005).
+    # Single-worker runs keep seven_zip_threads=None so 7z uses all cores (fast path).
+    cpu = os.cpu_count() or 1
+    n_workers_for_threads = max(1, min(max_workers, len(jobs))) if run_mode != "sequential" else 1
+    seven_zip_threads = max(1, cpu // n_workers_for_threads) if n_workers_for_threads > 1 else None
+
+    def _run_one(job: BackupJob) -> BackupResult:
+        return run_job(
+            job,
+            config_dir=config_dir,
+            data_dir=data_dir,
+            clock=clock,
+            zip_compression_level=zip_compression_level,
+            seven_zip_compression_level=seven_zip_compression_level,
+            prefer_py7zr=prefer_py7zr,
+            threads=seven_zip_threads,
+            cancel=cancel,
+            dry_run=dry_run,
+            on_progress=((lambda p, _job=job: on_progress(_job.id, p)) if on_progress else None),
+        )
+
+    def _persist(result: BackupResult) -> None:
+        if result.updated_job is not None:
+            with lock:
+                current = load_jobs(config_dir)
+                save_jobs(upsert_job(current, result.updated_job), config_dir)
+
+    # Sequential mode: run on the calling thread, in order, no pool.
+    if run_mode == "sequential" or max_workers <= 1:
+        for job in jobs:
+            if cancel is not None and cancel.is_set():
+                results[job.id] = _cancelled_result(job, clock)
+                if on_job_done is not None:
+                    on_job_done(job.id, results[job.id])
+                continue
+            result = _run_one(job)
+            results[job.id] = result
+            _persist(result)
+            if on_job_done is not None:
+                on_job_done(job.id, result)
+        return [results[jid] for jid in order]
+
+    # Parallel mode: bounded worker pool + queue.
+    q: queue.Queue[BackupJob | None] = queue.Queue()
     for job in jobs:
         q.put(job)
 
@@ -100,26 +152,8 @@ def run_jobs_batch(
                 q.task_done()
                 continue
             try:
-                result = run_job(
-                    job,
-                    config_dir=config_dir,
-                    data_dir=data_dir,
-                    clock=clock,
-                    zip_compression_level=zip_compression_level,
-                    seven_zip_compression_level=seven_zip_compression_level,
-                    prefer_py7zr=prefer_py7zr,
-                    threads=seven_zip_threads,
-                    cancel=cancel,
-                    on_progress=(
-                        (lambda p, _job=job: on_progress(_job.id, p))
-                        if on_progress
-                        else None
-                    ),
-                )
-                if result.updated_job is not None:
-                    with lock:
-                        current = load_jobs(config_dir)
-                        save_jobs(upsert_job(current, result.updated_job), config_dir)
+                result = _run_one(job)
+                _persist(result)
                 results[job.id] = result
                 if on_job_done is not None:
                     on_job_done(job.id, result)
@@ -127,14 +161,7 @@ def run_jobs_batch(
                 q.task_done()
 
     n_workers = max(1, min(max_workers, len(jobs)))
-    # Cap 7z threads so concurrent 7z jobs don't oversubscribe the CPU (NTH-005).
-    # Single-worker runs keep seven_zip_threads=None so 7z uses all cores (fast path).
-    cpu = os.cpu_count() or 1
-    seven_zip_threads = max(1, cpu // n_workers) if n_workers > 1 else None
-    threads = [
-        threading.Thread(target=worker, name=f"backup-worker-{i}", daemon=True)
-        for i in range(n_workers)
-    ]
+    threads = [threading.Thread(target=worker, name=f"backup-worker-{i}", daemon=True) for i in range(n_workers)]
     for t in threads:
         t.start()
     for t in threads:

@@ -4,20 +4,21 @@ from __future__ import annotations
 
 import json
 import os
-import platformdirs
 import tempfile
 from pathlib import Path
 from typing import Any
 
+import platformdirs
+
 from abackup.core.paths import (
+    default_config_dir,
+    ensure_dir,
     get_config_dir,
     get_data_dir,
-    ensure_dir,
-    settings_file_path,
     jobs_file_path,
-    default_config_dir,
+    settings_file_path,
 )
-from abackup.models import Settings, BackupJob
+from abackup.models import BackupJob, Settings
 from abackup.utils.errors import ConfigError
 
 # Previous default location (platformdirs). Used only for one-time migration.
@@ -46,7 +47,7 @@ def load_settings(config_dir: str | Path | None = None) -> Settings:
     if not path.exists():
         return Settings()
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return Settings.from_dict(json.load(f))
     except (json.JSONDecodeError, OSError) as exc:
         raise ConfigError(f"Failed to read settings at {path}: {exc}") from exc
@@ -65,7 +66,7 @@ def load_jobs(config_dir: str | Path | None = None) -> list[BackupJob]:
     if not path.exists():
         return []
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             raw = json.load(f)
         return [BackupJob.from_dict(item) for item in raw]
     except (json.JSONDecodeError, OSError) as exc:

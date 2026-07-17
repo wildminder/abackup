@@ -8,8 +8,8 @@ safe to hand the same snapshot across threads without accidental mutation.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 # Phases a job moves through.
 PHASE_PENDING = "pending"

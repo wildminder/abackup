@@ -2,34 +2,34 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Callable
-
 import threading
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 
 from abackup.config import _atomic_write
 from abackup.core.compression import make_archive, make_zip
 from abackup.core.copy import copy_tree
-from abackup.core.paths import get_data_dir, ensure_dir
+from abackup.core.paths import ensure_dir, get_data_dir
 from abackup.core.progress import (
-    Progress,
-    OptionalProgressCallback,
+    PHASE_CANCELLED,
     PHASE_DONE,
     PHASE_FAILED,
-    PHASE_CANCELLED,
-    STATUS_SUCCESS,
-    STATUS_FAILED,
     STATUS_CANCELLED,
+    STATUS_FAILED,
+    STATUS_SUCCESS,
+    OptionalProgressCallback,
+    Progress,
 )
+from abackup.core.retention import enforce_retention
 from abackup.models import BackupJob, BackupMethod
-from abackup.utils.errors import SourceNotFound, DestinationError, JobCancelled
+from abackup.utils.errors import DestinationError, JobCancelled, SourceNotFound
 from abackup.utils.logging import RunLogger
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @dataclass
@@ -52,10 +52,11 @@ def run_job(
     clock: Callable[[], datetime] | None = None,
     zip_compression_level: int = 6,
     seven_zip_compression_level: int = 3,
-    prefer_py7zr: bool = True,
+    prefer_py7zr: bool = False,
     use_hash: bool = False,
     threads: int | None = None,
     cancel: threading.Event | None = None,
+    dry_run: bool = False,
 ) -> BackupResult:
     """Run a single backup job.
 
@@ -65,6 +66,10 @@ def run_job(
 
     If ``cancel`` (a ``threading.Event``) is set mid-run, the underlying copy/zip
     raises ``JobCancelled`` and this returns a result with ``status="cancelled"``.
+
+    When ``dry_run`` is True, the job is planned (files scanned, include/exclude
+    applied) but nothing is written and no manifest is produced; the summary
+    reports the planned totals.
     """
     clock = clock or _now
     data_dir = get_data_dir(data_dir)
@@ -107,6 +112,9 @@ def run_job(
                 cancel=cancel,
                 job_id=job.id,
                 on_progress=_forward,
+                exclude_patterns=job.exclude_patterns,
+                include_patterns=job.include_patterns,
+                plan_only=dry_run,
             )
             summary: dict = {"archive": str(out)}
         elif job.method == BackupMethod.SEVEN_ZIP:
@@ -119,6 +127,9 @@ def run_job(
                 job_id=job.id,
                 on_progress=_forward,
                 threads=threads,
+                exclude_patterns=job.exclude_patterns,
+                include_patterns=job.include_patterns,
+                plan_only=dry_run,
             )
             summary = {"archive": str(out)}
         else:
@@ -129,23 +140,26 @@ def run_job(
                 on_progress=_forward,
                 use_hash=use_hash,
                 cancel=cancel,
+                exclude_patterns=job.exclude_patterns,
+                include_patterns=job.include_patterns,
+                plan_only=dry_run,
             )
         status = "success"
     except JobCancelled:
         _terminal(PHASE_CANCELLED, STATUS_CANCELLED)
-        updated = BackupJob(
-            **{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "cancelled"}
-        )
-        return BackupResult(
-            job.id, job.method.value, "cancelled", {}, None, "cancelled", updated
-        )
+        updated = BackupJob(**{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "cancelled"})
+        return BackupResult(job.id, job.method.value, "cancelled", {}, None, "cancelled", updated)
     except (SourceNotFound, DestinationError) as exc:
         logger.log("error", {"job_id": job.id, "error": str(exc)})
         _terminal(PHASE_FAILED, STATUS_FAILED)
-        updated = BackupJob(
-            **{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "failed"}
-        )
+        updated = BackupJob(**{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "failed"})
         return BackupResult(job.id, job.method.value, "failed", {}, None, str(exc), updated)
+
+    if dry_run:
+        # No writes, no manifest, no retention. Report the plan.
+        _terminal(PHASE_DONE, STATUS_SUCCESS)
+        updated = BackupJob(**{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": "success"})
+        return BackupResult(job.id, job.method.value, "success", summary, None, None, updated)
 
     _terminal(PHASE_DONE, STATUS_SUCCESS)
 
@@ -162,9 +176,18 @@ def run_job(
     _atomic_write(manifest_path, manifest)
     logger.log("info", manifest)
 
-    updated = BackupJob(
-        **{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": status}
-    )
-    return BackupResult(
-        job.id, job.method.value, status, summary, str(manifest_path), None, updated
-    )
+    # Retention: for archive methods, prune old archives in the destination.
+    deleted: list[str] = []
+    if job.retention_count is not None and job.method != BackupMethod.COPY:
+        from pathlib import Path as _Path
+
+        dest = _Path(job.destination)
+        if dest.is_dir():
+            ext = ".zip" if job.method == BackupMethod.ZIP else ".7z"
+            archives = [p for p in dest.glob(f"*{ext}") if p.is_file()]
+            deleted = [str(p) for p in enforce_retention(archives, job.retention_count)]
+
+    updated = BackupJob(**{**job.to_dict(), "last_run_at": clock().isoformat(), "last_status": status})
+    if deleted:
+        summary = {**summary, "archives_deleted": deleted}
+    return BackupResult(job.id, job.method.value, status, summary, str(manifest_path), None, updated)
