@@ -42,6 +42,7 @@ def run_jobs_batch(
     zip_compression_level: int | None = None,
     seven_zip_compression_level: int | None = None,
     prefer_py7zr: bool | None = None,
+    prefer_robocopy: bool | None = None,
     cancel: threading.Event | None = None,
     run_mode: str | None = None,
     dry_run: bool = False,
@@ -73,6 +74,8 @@ def run_jobs_batch(
         zip_compression_level = settings.zip_compression_level
     if prefer_py7zr is None:
         prefer_py7zr = settings.prefer_py7zr
+    if prefer_robocopy is None:
+        prefer_robocopy = settings.prefer_robocopy
     if seven_zip_compression_level is None:
         seven_zip_compression_level = settings.seven_zip_compression_level
     if run_mode is None:
@@ -97,6 +100,7 @@ def run_jobs_batch(
             zip_compression_level=zip_compression_level,
             seven_zip_compression_level=seven_zip_compression_level,
             prefer_py7zr=prefer_py7zr,
+            prefer_robocopy=prefer_robocopy,
             threads=seven_zip_threads,
             cancel=cancel,
             dry_run=dry_run,

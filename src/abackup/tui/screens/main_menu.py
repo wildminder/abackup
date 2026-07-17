@@ -49,6 +49,10 @@ class MainMenuScreen(Screen):
             Button("Settings", id="settings"),
             Button("Quit", id="quit"),
         )
+        yield Horizontal(
+            Button("Export config", id="export"),
+            Button("Import config", id="import"),
+        )
         yield Static("", id="status")
         yield Static(
             "↑/↓ select · Enter run · A add · D delete · H history · R run all · S settings",
@@ -98,6 +102,16 @@ class MainMenuScreen(Screen):
             return
         if event.button.id == "quit":
             self.app.exit()
+            return
+        if event.button.id == "export":
+            from abackup.tui.screens.portability import PortabilityScreen
+
+            self.app.push_screen(PortabilityScreen(self.config_dir, mode="export"))
+            return
+        if event.button.id == "import":
+            from abackup.tui.screens.portability import PortabilityScreen
+
+            self.app.push_screen(PortabilityScreen(self.config_dir, mode="import"))
             return
         if not jobs:
             self.query_one("#status", Static).update("No jobs to act on.")

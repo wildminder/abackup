@@ -25,6 +25,18 @@ def get_job(jobs: list[BackupJob], job_id: str) -> BackupJob:
     raise JobNotFound(f"Job not found: {job_id}")
 
 
+def find_job_by_name(jobs: list[BackupJob], name: str) -> BackupJob | None:
+    """Return the first job whose ``name`` exactly matches ``name`` (case-sensitive).
+
+    Returns ``None`` when no job matches, so callers can surface a clean
+    "not found" error for the headless CLI.
+    """
+    for j in jobs:
+        if j.name == name:
+            return j
+    return None
+
+
 def update_job(jobs: list[BackupJob], job: BackupJob) -> list[BackupJob]:
     if not any(j.id == job.id for j in jobs):
         raise JobNotFound(f"Job not found: {job.id}")

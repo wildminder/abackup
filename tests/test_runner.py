@@ -554,3 +554,48 @@ def test_run_jobs_batch_single_worker_uses_no_thread_cap(sample_tree, tmp_path, 
     jobs = [_make_job(i, sample_tree, tmp_path / f"d{i}") for i in range(2)]
     run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=1)
     assert captured == [None, None]
+
+
+def test_run_jobs_batch_forwards_prefer_robocopy(tmp_config, tmp_data, sample_tree, tmp_path, monkeypatch):
+    import abackup.core.runner as runner_mod
+    from abackup.core.backup import BackupResult
+
+    captured = {}
+
+    def spy(job, **kwargs):
+        captured["prefer_robocopy"] = kwargs.get("prefer_robocopy")
+        return BackupResult(job.id, job.method.value, "success", {}, None, None, job)
+
+    monkeypatch.setattr(runner_mod, "run_job", spy)
+    jobs = [_make_job(0, sample_tree, tmp_path / "d0")]
+    # Explicit False must be forwarded verbatim (not overridden by settings).
+    run_jobs_batch(
+        jobs,
+        config_dir=tmp_config,
+        data_dir=tmp_data,
+        max_workers=1,
+        prefer_robocopy=False,
+    )
+    assert captured["prefer_robocopy"] is False
+
+
+def test_run_jobs_batch_defaults_prefer_robocopy_from_settings(
+    tmp_config, tmp_data, sample_tree, tmp_path, monkeypatch
+):
+    import abackup.core.runner as runner_mod
+    from abackup.config import save_settings
+    from abackup.core.backup import BackupResult
+    from abackup.models import Settings
+
+    save_settings(Settings(prefer_robocopy=False), tmp_config)
+    captured = {}
+
+    def spy(job, **kwargs):
+        captured["prefer_robocopy"] = kwargs.get("prefer_robocopy")
+        return BackupResult(job.id, job.method.value, "success", {}, None, None, job)
+
+    monkeypatch.setattr(runner_mod, "run_job", spy)
+    jobs = [_make_job(0, sample_tree, tmp_path / "d0")]
+    run_jobs_batch(jobs, config_dir=tmp_config, data_dir=tmp_data, max_workers=1)
+    assert captured["prefer_robocopy"] is False
+

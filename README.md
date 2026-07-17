@@ -56,7 +56,15 @@ python -m abackup
 | `--config-dir DIR` | Override the config directory (useful for portable / automated use). |
 | `--data-dir DIR` | Override the data directory (logs, manifests). |
 | `--run-all` | Run every configured job non-interactively and print a summary (requires `--config-dir`). |
+| `--run-due` | Like `--run-all`, but only jobs whose schedule is currently due (requires `--config-dir`). |
+| `--run NAME` | Run a single job by name non-interactively; exit code reflects the result (requires `--config-dir`). |
+| `--list-jobs` | Print all configured jobs (name, method, source → destination) and exit. |
+| `--tag TAG` | With `--run-all`/`--run-due`, only run jobs carrying this tag. |
 | `--workers N` | Number of concurrent backup workers for `--run-all` (default: `max_workers` setting). |
+| `--dry-run` | With any run flag, plan the backup without writing anything. |
+| `--export PATH` | Export all jobs + settings to a portable JSON file at `PATH`. |
+| `--import PATH` | Import jobs + settings from a portable JSON file at `PATH`. |
+| `--merge` | With `--import`, merge imported jobs into existing ones (by id) instead of overwriting. |
 | `--show-settings` | Print the resolved config directory and current settings as JSON, then exit. |
 
 Example (portable / automated):
@@ -64,6 +72,9 @@ Example (portable / automated):
 ```bash
 abackup --config-dir ./my-config --data-dir ./my-data
 abackup --run-all --config-dir ./my-config --workers 4
+abackup --run "Documents" --config-dir ./my-config   # single job, headless
+abackup --export ./portable.json --config-dir ./my-config
+abackup --import ./portable.json --config-dir ./other-machine
 ```
 
 ### Running all jobs
@@ -72,6 +83,45 @@ abackup --run-all --config-dir ./my-config --workers 4
   concurrently (progress + per-job results are shown on the run-all screen).
 - From the CLI, `abackup --run-all --config-dir DIR` runs all jobs and prints a
   summary without opening the terminal UI.
+
+### Headless / scheduled runs
+
+ABackup can run entirely from the command line, which makes it suitable for
+`cron` / Windows Task Scheduler integration without launching the TUI:
+
+- `abackup --run NAME --config-dir DIR` runs a single named job and exits.
+- `abackup --run-all --config-dir DIR` runs every job; `--run-due` restricts the
+  batch to jobs whose schedule is currently due.
+- `--tag TAG` limits a batch to jobs carrying that tag.
+- `--list-jobs` prints the configured jobs so a wrapper script can enumerate them.
+
+The process exit code reflects the outcome of a run:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | All jobs succeeded. |
+| `1` | At least one job failed. |
+| `2` | At least one job was cancelled (e.g. via the Cancel button in the TUI). |
+
+A missing job name (`--run nope`) or a malformed import file exits non-zero with
+a descriptive message on stderr/stdout.
+
+### Portable config (export / import)
+
+You can replicate an entire setup on another machine without re-entering jobs:
+
+- **Export:** `abackup --export portable.json --config-dir DIR` writes all jobs
+  and settings to a single JSON file. The same action is available in the TUI via
+  **Main menu → Export config** / **Import config**.
+- **Import:** `abackup --import portable.json --config-dir DIR` replaces the
+  target config's jobs + settings. Add `--merge` to combine imported jobs with
+  the existing ones (matched by job id) instead of overwriting.
+
+When **Store paths relative to config directory** is enabled in Settings, source
+and destination paths are saved relative to the config directory. On load they
+are re-expanded to absolute paths, so a config copied to a machine with a
+different drive letter or mount point still resolves correctly. Paths that live
+outside the config directory are always stored as absolute.
 
 Jobs run concurrently via a bounded pool of worker threads fed from a queue, so a
 large number of jobs is processed with bounded memory. The worker count is

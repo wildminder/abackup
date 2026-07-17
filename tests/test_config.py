@@ -1,6 +1,9 @@
 import json
+from pathlib import Path
 
 from abackup.config import (
+    export_config,
+    import_config,
     init_storage,
     load_jobs,
     load_settings,
@@ -175,6 +178,7 @@ def test_relocate_data_no_tmp_leftovers(tmp_path):
 
 def test_relocate_storage_also_moves_data(tmp_path):
     old = tmp_path / "old"
+
     old.mkdir()
     (old / "settings.json").write_text("{}", encoding="utf-8")
     (old / "jobs.json").write_text("[]", encoding="utf-8")
@@ -191,3 +195,112 @@ def test_relocate_storage_also_moves_data(tmp_path):
     assert (new / "manifests" / "y.json").exists()
     assert not (old / "settings.json").exists()
     assert not (old / "logs").exists()
+
+
+def test_export_config_writes_portable_file(tmp_config, tmp_path):
+    save_settings(Settings(default_destination="D:/x"), tmp_config)
+    save_jobs([BackupJob(source="C:/a", destination="D:/b", method="copy")], tmp_config)
+    dest = tmp_path / "portable.json"
+    export_config(tmp_config, dest)
+    data = json.loads(dest.read_text(encoding="utf-8"))
+    assert "settings" in data and "jobs" in data
+    assert data["settings"]["default_destination"] == "D:/x"
+    assert len(data["jobs"]) == 1
+
+
+def test_import_config_overwrites(tmp_config, tmp_path):
+    save_jobs([BackupJob(source="C:/a", destination="D:/b", method="copy")], tmp_config)
+    dest = tmp_path / "portable.json"
+    export_config(tmp_config, dest)
+    # Change the source config, then import -> should be overwritten.
+    save_jobs([BackupJob(source="C:/other", destination="D:/b", method="copy")], tmp_config)
+    import_config(dest, tmp_config)
+    jobs = load_jobs(tmp_config)
+    assert len(jobs) == 1
+    assert jobs[0].source == "C:/a"
+
+
+def test_import_config_merge_upserts_by_id(tmp_config, tmp_path):
+    save_jobs([BackupJob(source="C:/a", destination="D:/b", method="copy", id="1", name="a")], tmp_config)
+    dest = tmp_path / "portable.json"
+    export_config(tmp_config, dest)
+    # Existing job "1" plus a new job "2"; merge should keep both, "1" updated.
+    save_jobs(
+        [
+            BackupJob(source="C:/a2", destination="D:/b", method="copy", id="1", name="a"),
+            BackupJob(source="C:/c", destination="D:/d", method="copy", id="2", name="c"),
+        ],
+        tmp_config,
+    )
+    import_config(dest, tmp_config, merge=True)
+    jobs = {j.id: j for j in load_jobs(tmp_config)}
+    assert set(jobs) == {"1", "2"}
+    # Job "1" came from the imported file (overwrote the existing one).
+    assert jobs["1"].source == "C:/a"
+
+
+def test_import_config_rejects_invalid_json(tmp_config, tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    try:
+        import_config(bad, tmp_config)
+    except ConfigError:
+        return
+    raise AssertionError("expected ConfigError")
+
+
+def test_import_config_rejects_invalid_job(tmp_config, tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"settings": {}, "jobs": [{"method": "copy"}]}), encoding="utf-8")
+    try:
+        import_config(bad, tmp_config)
+    except ConfigError:
+        return
+    raise AssertionError("expected ConfigError")
+
+
+def test_export_import_roundtrip(tmp_config, tmp_path):
+    save_settings(Settings(default_destination="D:/x", max_workers=7), tmp_config)
+    save_jobs(
+        [
+            BackupJob(source="C:/a", destination="D:/b", method="copy", name="a"),
+            BackupJob(source="C:/c", destination="D:/d", method="7z", name="c"),
+        ],
+        tmp_config,
+    )
+    dest = tmp_path / "portable.json"
+    export_config(tmp_config, dest)
+    new_dir = tmp_path / "new"
+    import_config(dest, new_dir)
+    settings = load_settings(new_dir)
+    jobs = load_jobs(new_dir)
+    assert settings.max_workers == 7
+    assert settings.default_destination == "D:/x"
+    assert len(jobs) == 2
+    assert {j.name for j in jobs} == {"a", "c"}
+
+
+def test_save_jobs_relative_when_enabled(tmp_config):
+    save_settings(Settings(relative_paths=True), tmp_config)
+    src = Path(tmp_config) / "sources" / "docs"
+    save_jobs([BackupJob(source=str(src), destination="D:/b", method="copy")], tmp_config)
+    raw = json.loads((Path(tmp_config) / "jobs.json").read_text(encoding="utf-8"))
+    assert raw[0]["source"] == "sources/docs"
+
+
+def test_load_jobs_resolves_relative_to_absolute(tmp_config):
+    save_settings(Settings(relative_paths=True), tmp_config)
+    src = Path(tmp_config) / "sources" / "docs"
+    save_jobs([BackupJob(source=str(src), destination="D:/b", method="copy")], tmp_config)
+    jobs = load_jobs(tmp_config)
+    assert Path(jobs[0].source).is_absolute()
+    assert Path(jobs[0].source) == src.resolve()
+
+
+def test_relative_paths_off_stores_absolute(tmp_config):
+    save_settings(Settings(relative_paths=False), tmp_config)
+    src = Path(tmp_config) / "sources" / "docs"
+    save_jobs([BackupJob(source=str(src), destination="D:/b", method="copy")], tmp_config)
+    raw = json.loads((Path(tmp_config) / "jobs.json").read_text(encoding="utf-8"))
+    assert raw[0]["source"] == str(src)
+

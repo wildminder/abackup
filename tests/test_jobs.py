@@ -1,10 +1,23 @@
-from abackup.core.jobs import add_job, get_job, list_jobs, remove_job, update_job
+from abackup.core.jobs import (
+    add_job,
+    find_job_by_name,
+    get_job,
+    list_jobs,
+    remove_job,
+    update_job,
+)
 from abackup.models import BackupJob
 from abackup.utils.errors import JobNotFound
 
 
-def _job(id_):
-    return BackupJob(source=f"C:/{id_}", destination="D:/b", method="copy", id=id_)
+def _job(id_, name=None):
+    return BackupJob(
+        source=f"C:/{id_}",
+        destination="D:/b",
+        method="copy",
+        id=id_,
+        name=name or f"job-{id_}",
+    )
 
 
 def test_add_and_list():
@@ -60,3 +73,22 @@ def test_remove_job_missing_raises():
     except JobNotFound:
         return
     raise AssertionError("expected JobNotFound")
+
+
+def test_find_job_by_name_finds_exact():
+    jobs = add_job([], _job("1", name="alpha"))
+    jobs = add_job(jobs, _job("2", name="beta"))
+    found = find_job_by_name(jobs, "beta")
+    assert found is not None
+    assert found.id == "2"
+
+
+def test_find_job_by_name_case_sensitive():
+    jobs = add_job([], _job("1", name="Alpha"))
+    assert find_job_by_name(jobs, "alpha") is None
+    assert find_job_by_name(jobs, "Alpha") is not None
+
+
+def test_find_job_by_name_missing_returns_none():
+    assert find_job_by_name([], "nope") is None
+

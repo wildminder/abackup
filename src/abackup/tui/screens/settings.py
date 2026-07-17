@@ -193,6 +193,21 @@ class SettingsScreen(Screen):
                 ),
                 classes="field",
             ),
+            Vertical(
+                Checkbox(
+                    "Store paths relative to config directory (portable config)",
+                    id="relative_paths",
+                ),
+                Static(
+                    "When enabled, job source/destination paths are saved relative "
+                    "to the config directory, so the config is portable across "
+                    "machines with different drive letters or mount points. Paths "
+                    "are re-expanded to absolute on load. Disable to always store "
+                    "absolute paths.",
+                    classes="field-hint",
+                ),
+                classes="field",
+            ),
             Static("", id="error"),
             id="body",
         )
@@ -224,6 +239,7 @@ class SettingsScreen(Screen):
         self.query_one("#notify_on_finish", Checkbox).value = self._existing.notify_on_finish
         self.query_one("#sound_on_failure", Checkbox).value = self._existing.sound_on_failure
         self.query_one("#prefer_robocopy", Checkbox).value = self._existing.prefer_robocopy
+        self.query_one("#relative_paths", Checkbox).value = self._existing.relative_paths
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
@@ -248,6 +264,7 @@ class SettingsScreen(Screen):
             notify_on_finish = self.query_one("#notify_on_finish", Checkbox).value
             sound_on_failure = self.query_one("#sound_on_failure", Checkbox).value
             prefer_robocopy = self.query_one("#prefer_robocopy", Checkbox).value
+            relative_paths = self.query_one("#relative_paths", Checkbox).value
         except ValueError as exc:
             error.update(f"Invalid number: {exc}")
             return
@@ -266,6 +283,7 @@ class SettingsScreen(Screen):
             notify_on_finish=notify_on_finish,
             sound_on_failure=sound_on_failure,
             prefer_robocopy=prefer_robocopy,
+            relative_paths=relative_paths,
             created_at=self._existing.created_at,
         )
         try:

@@ -8,7 +8,9 @@ from abackup.core.paths import (
     get_config_dir,
     get_data_dir,
     jobs_file_path,
+    make_relative,
     resolve_destination,
+    resolve_path,
     safe_archive_name,
     settings_file_path,
     shorten_display_path,
@@ -257,3 +259,39 @@ def test_resolve_destination_explicit_stamp_flag():
 
     out = resolve_destination(job, clock=clock, stamp=True)
     assert out == str(Path("D:/Backups") / "2026-05-06_070809")
+
+
+def test_make_relative_under_base():
+    base = Path("/home/user/abackup")
+    child = Path("/home/user/abackup/jobs/source")
+    rel = make_relative(child, base)
+    assert rel == "jobs/source"
+    assert not Path(rel).is_absolute()
+
+
+def test_make_relative_outside_base_returns_absolute():
+    base = Path("/home/user/abackup")
+    other = Path("/mnt/other/drive")
+    assert make_relative(other, base) == str(other)
+
+
+def test_make_relative_no_base_returns_absolute():
+    p = "C:/some/path"
+    assert make_relative(p, None) == str(Path(p))
+
+
+def test_resolve_path_relative_joins_base():
+    base = Path("/home/user/abackup")
+    assert resolve_path("jobs/source", base=base) == base / "jobs/source"
+
+
+def test_resolve_path_absolute_unchanged():
+    abs_path = Path("/mnt/other/drive")
+    assert resolve_path(abs_path, base=Path("/home/user")) == abs_path
+
+
+def test_resolve_path_relative_no_base_resolves():
+    rel = "relative/only"
+    resolved = resolve_path(rel)
+    assert resolved.is_absolute()
+

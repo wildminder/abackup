@@ -60,6 +60,41 @@ def ensure_dir(path: str | Path) -> Path:
     return p
 
 
+def make_relative(path: str | Path, base: str | Path) -> str:
+    """Return ``path`` relative to ``base`` when it lives under ``base``.
+
+    The result is a POSIX-style relative string (e.g. ``"sub/file.txt"``) so the
+    stored config is portable across machines. When ``path`` is not under
+    ``base`` (or ``base`` is not given), the absolute path string is returned.
+    """
+    path = Path(path)
+    if base is None:
+        return str(path)
+    base_path = Path(base).resolve()
+    try:
+        rel = path.resolve().relative_to(base_path)
+    except ValueError:
+        return str(path)
+    return rel.as_posix()
+
+
+def resolve_path(path: str | Path, base: str | Path | None = None) -> Path:
+    """Resolve ``path`` to an absolute, runnable path.
+
+    If ``path`` is already absolute it is returned as-is (``Path(path)``). If it
+    is relative and ``base`` is provided, it is joined with ``base``. This lets a
+    config that stores relative paths (portable mode) be rehydrated on any
+    machine with a different drive letter / mount point.
+    """
+    p = Path(path)
+    if p.is_absolute():
+        return p
+    if base is not None:
+        return Path(base) / p
+    return p.resolve()
+
+
+
 def safe_archive_name(source_name: str, when: date | None = None, ext: str = ".zip") -> str:
     """Deterministic archive name: ``<source>_<YYYY-MM-DD><ext>``.
 

@@ -30,7 +30,9 @@ def test_cli_run_all_runs_every_job(tmp_config, tmp_data, sample_tree, tmp_path,
     save_jobs(jobs, tmp_config)
     save_settings(Settings(), tmp_config)
 
-    main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    with pytest.raises(SystemExit) as exc:
+        main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert exc.value.code == 0
     out = capsys.readouterr().out
     assert "Completed 2 jobs" in out
     stored = load_jobs(tmp_config)
@@ -74,7 +76,9 @@ def test_cli_workers_flag(tmp_config, tmp_data, sample_tree, tmp_path, monkeypat
         return []
 
     monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
-    main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data, "--workers", "2"])
+    with pytest.raises(SystemExit) as exc:
+        main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data, "--workers", "2"])
+    assert exc.value.code == 0
     assert captured["max_workers"] == 2
 
 
@@ -108,7 +112,9 @@ def test_cli_run_all_passes_seven_zip_level(tmp_config, tmp_data, sample_tree, t
         return []
 
     monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
-    main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    with pytest.raises(SystemExit) as exc:
+        main(["--run-all", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert exc.value.code == 0
     assert captured["seven_zip_compression_level"] == 5
 
 
@@ -168,7 +174,9 @@ def test_cli_run_all_uses_config_dir_as_data_dir(tmp_config, sample_tree, tmp_pa
         return []
 
     monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
-    main(["--run-all", "--config-dir", tmp_config])
+    with pytest.raises(SystemExit) as exc:
+        main(["--run-all", "--config-dir", tmp_config])
+    assert exc.value.code == 0
     assert captured["config_dir"] == tmp_config
     assert captured["data_dir"] == tmp_config
 
@@ -205,7 +213,9 @@ def test_cli_run_due_filters_by_schedule(tmp_config, tmp_data, sample_tree, tmp_
     import abackup.core.scheduler as sched_mod
 
     monkeypatch.setattr(sched_mod, "is_due", lambda job, n=None: job.id == due.id)
-    main(["--run-due", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    with pytest.raises(SystemExit) as exc:
+        main(["--run-due", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert exc.value.code == 0
     assert captured["ids"] == [due.id]
 
 
@@ -223,7 +233,9 @@ def test_cli_run_all_tag_filter(tmp_config, tmp_data, sample_tree, tmp_path, mon
         return []
 
     monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
-    main(["--run-all", "--tag", "docs", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    with pytest.raises(SystemExit) as exc:
+        main(["--run-all", "--tag", "docs", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert exc.value.code == 0
     assert captured["ids"] == [a.id]
 
 
@@ -240,5 +252,185 @@ def test_cli_run_all_dry_run_no_writes(tmp_config, tmp_data, sample_tree, tmp_pa
         return []
 
     monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
-    main(["--run-all", "--dry-run", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    with pytest.raises(SystemExit) as exc:
+        main(["--run-all", "--dry-run", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert exc.value.code == 0
     assert captured["dry_run"] is True
+
+
+def test_cli_list_jobs_prints_names(tmp_config, tmp_data, capsys):
+    jobs = [
+        BackupJob(source="C:/a", destination="D:/b", method="copy", name="alpha"),
+        BackupJob(source="C:/c", destination="D:/d", method="7z", name="beta"),
+    ]
+    save_jobs(jobs, tmp_config)
+    save_settings(Settings(), tmp_config)
+    main(["--list-jobs", "--config-dir", tmp_config])
+    out = capsys.readouterr().out
+    assert "alpha" in out
+    assert "beta" in out
+    assert "copy" in out
+    assert "7z" in out
+
+
+def test_cli_list_jobs_empty(tmp_config, tmp_data, capsys):
+    save_settings(Settings(), tmp_config)
+    main(["--list-jobs", "--config-dir", tmp_config])
+    assert "No jobs configured" in capsys.readouterr().out
+
+
+def test_cli_list_jobs_requires_config_dir(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["--list-jobs"])
+    assert exc.value.code is not None
+    assert "config-dir" in str(exc.value)
+
+
+def test_cli_run_single_job_success(tmp_config, tmp_data, sample_tree, tmp_path, capsys):
+    job = BackupJob(
+        source=str(sample_tree),
+        destination=str(tmp_path / "out"),
+        method="copy",
+        name="only",
+    )
+    save_jobs([job], tmp_config)
+    save_settings(Settings(), tmp_config)
+    with pytest.raises(SystemExit) as exc:
+        main(["--run", "only", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "Completed 1 jobs" in out
+    assert "1 success" in out
+    stored = load_jobs(tmp_config)
+    assert stored[0].last_status == "success"
+
+
+def test_cli_run_single_job_dry_run_no_writes(tmp_config, tmp_data, sample_tree, tmp_path, capsys):
+    job = BackupJob(
+        source=str(sample_tree),
+        destination=str(tmp_path / "out"),
+        method="copy",
+        name="only",
+    )
+    save_jobs([job], tmp_config)
+    save_settings(Settings(), tmp_config)
+    with pytest.raises(SystemExit) as exc:
+        main(["--run", "only", "--dry-run", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "1 success" in out
+    # Dry run must not create the destination directory.
+    assert not (tmp_path / "out").exists()
+
+
+def test_cli_run_unknown_job_exits_nonzero(tmp_config, tmp_data, capsys):
+    save_jobs([BackupJob(source="C:/a", destination="D:/b", method="copy", name="real")], tmp_config)
+    save_settings(Settings(), tmp_config)
+    with pytest.raises(SystemExit) as exc:
+        main(["--run", "nope", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert exc.value.code != 0
+    assert "not found" in str(exc.value)
+
+
+def test_cli_run_requires_config_dir(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["--run", "x"])
+    assert "config-dir" in str(exc.value)
+
+
+def test_cli_run_single_job_failure_exits_1(tmp_config, tmp_data, sample_tree, tmp_path, monkeypatch):
+    job = BackupJob(source=str(sample_tree), destination=str(tmp_path / "out"), method="copy", name="only")
+    save_jobs([job], tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    from abackup.core.backup import BackupResult
+
+    def fake_run(jobs, **kwargs):
+        return [BackupResult(jobs[0].id, "copy", "failed", {}, None, "boom", jobs[0])]
+
+    monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
+    with pytest.raises(SystemExit) as exc:
+        main(["--run", "only", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert exc.value.code == 1
+
+
+def test_cli_run_single_job_cancelled_exits_2(tmp_config, tmp_data, sample_tree, tmp_path, monkeypatch):
+    job = BackupJob(source=str(sample_tree), destination=str(tmp_path / "out"), method="copy", name="only")
+    save_jobs([job], tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    from abackup.core.backup import BackupResult
+
+    def fake_run(jobs, **kwargs):
+        return [BackupResult(jobs[0].id, "copy", "cancelled", {}, None, "stopped", jobs[0])]
+
+    monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
+    with pytest.raises(SystemExit) as exc:
+        main(["--run", "only", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert exc.value.code == 2
+
+
+def test_cli_run_passes_prefer_robocopy(tmp_config, tmp_data, sample_tree, tmp_path, monkeypatch):
+    job = BackupJob(source=str(sample_tree), destination=str(tmp_path / "out"), method="copy", name="only")
+    save_jobs([job], tmp_config)
+    save_settings(Settings(prefer_robocopy=False), tmp_config)
+    captured = {}
+
+    from abackup.core.backup import BackupResult
+
+    def fake_run(jobs, **kwargs):
+        captured["prefer_robocopy"] = kwargs.get("prefer_robocopy")
+        return [BackupResult(jobs[0].id, "copy", "success", {}, None, None, jobs[0])]
+
+    monkeypatch.setattr("abackup.cli.run_jobs_batch", fake_run)
+    with pytest.raises(SystemExit) as exc:
+        main(["--run", "only", "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert exc.value.code == 0
+    assert captured["prefer_robocopy"] is False
+
+
+def test_cli_export_writes_file(tmp_config, tmp_data, tmp_path, capsys):
+    save_jobs([BackupJob(source="C:/a", destination="D:/b", method="copy", name="j")], tmp_config)
+    save_settings(Settings(), tmp_config)
+    dest = tmp_path / "portable.json"
+    main(["--export", str(dest), "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert dest.exists()
+    assert "Exported" in capsys.readouterr().out
+
+
+def test_cli_export_requires_config_dir(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["--export", "x.json"])
+    assert "config-dir" in str(exc.value)
+
+
+def test_cli_import_overwrites(tmp_config, tmp_data, tmp_path, capsys):
+    save_jobs([BackupJob(source="C:/a", destination="D:/b", method="copy", name="j")], tmp_config)
+    save_settings(Settings(), tmp_config)
+    dest = tmp_path / "portable.json"
+    main(["--export", str(dest), "--config-dir", tmp_config, "--data-dir", tmp_data])
+
+    # New empty config dir; import should populate it.
+    from abackup.config import load_jobs
+
+    new_dir = tmp_path / "new"
+    main(["--import", str(dest), "--config-dir", str(new_dir)])
+    jobs = load_jobs(str(new_dir))
+    assert len(jobs) == 1
+    assert jobs[0].name == "j"
+
+
+def test_cli_import_requires_config_dir(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["--import", "x.json"])
+    assert "config-dir" in str(exc.value)
+
+
+def test_cli_import_invalid_exits_1(tmp_config, tmp_data, tmp_path, capsys):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        main(["--import", str(bad), "--config-dir", tmp_config, "--data-dir", tmp_data])
+    assert exc.value.code[0] == 1
+    assert "Import failed" in str(exc.value)
+

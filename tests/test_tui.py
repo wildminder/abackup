@@ -1119,6 +1119,83 @@ async def test_settings_prefer_robocopy_reflects_loaded(tmp_config, tmp_data):
         assert app.screen.query_one("#prefer_robocopy", Checkbox).value is False
 
 
+async def test_settings_relative_paths_toggle_persists(tmp_config, tmp_data):
+    """Tier 3: the relative-paths checkbox saves into settings."""
+    save_settings(Settings(relative_paths=False), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(app.config_dir, app.data_dir))
+        await pilot.pause()
+        app.screen.query_one("#relative_paths", Checkbox).value = True
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+    settings = load_settings(tmp_config)
+    assert settings.relative_paths is True
+
+
+async def test_settings_relative_paths_reflects_loaded(tmp_config, tmp_data):
+    """Tier 3: loaded relative_paths is reflected in the checkbox on mount."""
+    save_settings(Settings(relative_paths=True), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(SettingsScreen(app.config_dir, app.data_dir))
+        await pilot.pause()
+        assert app.screen.query_one("#relative_paths", Checkbox).value is True
+
+
+async def test_main_menu_has_export_import_buttons(tmp_config, tmp_data):
+    """Tier 3: the main menu exposes Export/Import config actions."""
+    save_settings(Settings(), tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.screen.query_one("#export", Button) is not None
+        assert app.screen.query_one("#import", Button) is not None
+
+
+async def test_portability_export_action_writes_file(tmp_config, tmp_data, tmp_path):
+    """Tier 3: the export modal writes a portable config file."""
+    from abackup.tui.screens.portability import PortabilityScreen
+
+    save_settings(Settings(), tmp_config)
+    save_jobs([BackupJob(source="C:/a", destination="D:/b", method="copy", name="j")], tmp_config)
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    dest = tmp_path / "portable.json"
+    async with app.run_test() as pilot:
+        app.push_screen(PortabilityScreen(tmp_config, mode="export"))
+        await pilot.pause()
+        app.screen.query_one("#path", Input).value = str(dest)
+        app.screen.query_one("#ok", Button).press()
+        await pilot.pause()
+    assert dest.exists()
+
+
+async def test_portability_import_action_loads_jobs(tmp_config, tmp_data, tmp_path):
+    """Tier 3: the import modal loads jobs from a portable file."""
+    from abackup.config import export_config
+    from abackup.tui.screens.portability import PortabilityScreen
+
+    save_settings(Settings(), tmp_config)
+    save_jobs([BackupJob(source="C:/a", destination="D:/b", method="copy", name="j")], tmp_config)
+    dest = tmp_path / "portable.json"
+    export_config(tmp_config, dest)
+
+    new_dir = tmp_path / "new"
+    app = ABackupApp(config_dir=str(new_dir), data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        app.push_screen(PortabilityScreen(str(new_dir), mode="import"))
+        await pilot.pause()
+        app.screen.query_one("#path", Input).value = str(dest)
+        app.screen.query_one("#ok", Button).press()
+        await pilot.pause()
+    from abackup.config import load_jobs
+
+    jobs = load_jobs(str(new_dir))
+    assert len(jobs) == 1
+    assert jobs[0].name == "j"
+
+
+
 async def test_run_job_screen_notifies_on_success_when_enabled(
     tmp_config, tmp_data, sample_tree, dest_dir, monkeypatch
 ):
