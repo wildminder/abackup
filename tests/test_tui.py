@@ -125,7 +125,7 @@ async def test_main_menu_shows_empty_state(tmp_config, tmp_data):
         assert "No jobs yet" in str(status.render())
         assert len(app.screen.query_one("#jobs", ListView).children) == 0
         # Job-dependent buttons are disabled until a job exists.
-        for bid in ("run", "history", "delete"):
+        for bid in ("run", "history", "delete", "export", "import"):
             assert app.screen.query_one(f"#{bid}", Button).disabled is True
         # Unrelated actions remain available.
         assert app.screen.query_one("#add", Button).disabled is False
@@ -141,7 +141,7 @@ async def test_main_menu_buttons_enabled_when_job_exists(tmp_config, tmp_data, s
     app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
     async with app.run_test():
         assert isinstance(app.screen, MainMenuScreen)
-        for bid in ("run", "history", "delete"):
+        for bid in ("run", "history", "delete", "export", "import"):
             assert app.screen.query_one(f"#{bid}", Button).disabled is False
 
 
@@ -207,7 +207,34 @@ async def test_main_menu_delete(tmp_config, tmp_data, sample_tree, dest_dir):
         assert isinstance(app.screen, MainMenuScreen)
         await pilot.click("#delete")
         await pilot.pause()
+        # Destructive action now requires confirmation (non-destructive UI).
+        from abackup.tui.screens.main_menu import _ConfirmScreen
+
+        assert isinstance(app.screen, _ConfirmScreen)
+        await pilot.click("#yes")
+        await pilot.pause()
         assert load_jobs(tmp_config) == []
+
+
+async def test_main_menu_delete_cancel_keeps_job(tmp_config, tmp_data, sample_tree, dest_dir):
+    # Clicking "No" on the confirmation dialog must leave the job intact.
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="copy")
+    save_jobs([job], tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        await pilot.click("#delete")
+        await pilot.pause()
+        from abackup.tui.screens.main_menu import _ConfirmScreen
+
+        assert isinstance(app.screen, _ConfirmScreen)
+        await pilot.click("#no")
+        await pilot.pause()
+        # Back on the main menu, job still present.
+        assert isinstance(app.screen, MainMenuScreen)
+        assert len(load_jobs(tmp_config)) == 1
 
 
 async def test_main_menu_run_button(tmp_config, tmp_data, sample_tree, dest_dir):

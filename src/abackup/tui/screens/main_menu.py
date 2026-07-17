@@ -2,13 +2,36 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from textual.containers import Horizontal
-from textual.screen import Screen
+from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, Footer, Header, Label, ListItem, ListView, Static
 
 from abackup.config import load_jobs, save_jobs
 from abackup.core.jobs import remove_job
 from abackup.core.paths import format_job_label
+
+
+class _ConfirmScreen(ModalScreen[bool]):
+    """Small yes/no confirmation dialog (keeps destructive actions safe)."""
+
+    def __init__(self, message: str, on_result: Callable[[bool], None]) -> None:
+        super().__init__()
+        self._message = message
+        self._on_result = on_result
+
+    def compose(self):
+        yield Static(self._message, id="confirm_msg")
+        yield Horizontal(
+            Button("Yes", id="yes", variant="error"),
+            Button("No", id="no", variant="primary"),
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        confirmed = event.button.id == "yes"
+        self._on_result(confirmed)
+        self.dismiss(confirmed)
 
 
 class MainMenuScreen(Screen):
@@ -26,6 +49,21 @@ class MainMenuScreen(Screen):
         background: $accent;
         color: $text;
         text-style: bold;
+    }
+    /* Compact secondary-action row: small, dense, single line. */
+    #secondary {
+        height: 3;
+        padding: 0 1;
+    }
+    #secondary Button {
+        min-width: 12;
+        padding: 0 1;
+    }
+    #confirm_msg {
+        padding: 1 2;
+        width: 60%;
+        background: $panel;
+        border: round $accent;
     }
     """
 
@@ -45,13 +83,12 @@ class MainMenuScreen(Screen):
             Button("History", id="history"),
         )
         yield Horizontal(
-            Button("Delete selected", id="delete", variant="error"),
             Button("Settings", id="settings"),
+            Button("Export", id="export"),
+            Button("Import", id="import"),
+            Button("Delete", id="delete", variant="error"),
             Button("Quit", id="quit"),
-        )
-        yield Horizontal(
-            Button("Export config", id="export"),
-            Button("Import config", id="import"),
+            id="secondary",
         )
         yield Static("", id="status")
         yield Static(
@@ -66,7 +103,7 @@ class MainMenuScreen(Screen):
     def _update_button_states(self, jobs: list) -> None:
         """Enable job-dependent buttons only when at least one job exists."""
         has_jobs = bool(jobs)
-        for button_id in ("run", "history", "delete"):
+        for button_id in ("run", "history", "delete", "export", "import"):
             self.query_one(f"#{button_id}", Button).disabled = not has_jobs
 
     def refresh_jobs(self) -> None:
@@ -109,9 +146,17 @@ class MainMenuScreen(Screen):
             self.app.push_screen(PortabilityScreen(self.config_dir, mode="export"))
             return
         if event.button.id == "import":
-            from abackup.tui.screens.portability import PortabilityScreen
+            # Import overwrites the current config: confirm first (non-destructive UI).
+            msg = "Import will replace your current jobs and settings. Continue?"
 
-            self.app.push_screen(PortabilityScreen(self.config_dir, mode="import"))
+            def _do_import(confirmed: bool) -> None:
+                if not confirmed:
+                    return
+                from abackup.tui.screens.portability import PortabilityScreen
+
+                self.app.push_screen(PortabilityScreen(self.config_dir, mode="import"))
+
+            self.app.push_screen(_ConfirmScreen(msg, _do_import))
             return
         if not jobs:
             self.query_one("#status", Static).update("No jobs to act on.")
@@ -125,8 +170,16 @@ class MainMenuScreen(Screen):
 
             self.app.push_screen(RunJobScreen(self.config_dir, self.data_dir, job))
         elif event.button.id == "delete":
-            save_jobs(remove_job(jobs, job.id), self.config_dir)
-            self.refresh_jobs()
+            # Destructive: require explicit confirmation before removing the job.
+            def _do_delete(confirmed: bool) -> None:
+                if not confirmed:
+                    return
+                save_jobs(remove_job(jobs, job.id), self.config_dir)
+                self.refresh_jobs()
+
+            self.app.push_screen(
+                _ConfirmScreen(f"Delete job '{job.name}'? This cannot be undone.", _do_delete)
+            )
 
     def _open_history(self, jobs: list, index: int) -> None:
         if not jobs:
