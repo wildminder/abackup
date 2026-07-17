@@ -44,6 +44,20 @@ class MainMenuScreen(Screen):
     ListItem {
         padding: 0 1;
     }
+    /* Each job row: label fills the row, delete mark sits at the right. */
+    ListItem > Horizontal {
+        height: auto;
+    }
+    .job_label {
+        width: 1fr;
+        padding: 0 1;
+    }
+    .job_delete {
+        min-width: 4;
+        width: 4;
+        padding: 0;
+        margin: 0 0 0 1;
+    }
     /* Highlight the keyboard-selected job (NTH-002). */
     ListItem:focus {
         background: $accent;
@@ -125,7 +139,11 @@ class MainMenuScreen(Screen):
         list_view = self.query_one("#jobs", ListView)
         list_view.clear()
         for j in jobs:
-            list_view.append(ListItem(Label(format_job_label(j.name, j.method.value, j.source, j.destination))))
+            row = Horizontal(
+                Label(format_job_label(j.name, j.method.value, j.source, j.destination), classes="job_label"),
+                Button("✕", id=f"del-{j.id}", variant="error", classes="job_delete"),
+            )
+            list_view.append(ListItem(row))
         status = self.query_one("#status", Static)
         status.update("No jobs yet. Add one." if not jobs else "")
         self._update_button_states(jobs)
@@ -190,16 +208,27 @@ class MainMenuScreen(Screen):
 
             self.app.push_screen(RunJobScreen(self.config_dir, self.data_dir, job))
         elif event.button.id == "delete":
-            # Destructive: require explicit confirmation before removing the job.
-            def _do_delete(confirmed: bool) -> None:
-                if not confirmed:
-                    return
-                save_jobs(remove_job(jobs, job.id), self.config_dir)
-                self.refresh_jobs()
+            self._confirm_delete(job)
+        elif event.button.id and event.button.id.startswith("del-"):
+            # Per-row delete button: find the job by id and confirm.
+            target_id = event.button.id[len("del-"):]
+            target = next((j for j in jobs if j.id == target_id), None)
+            if target is not None:
+                self._confirm_delete(target)
 
-            self.app.push_screen(
-                _ConfirmScreen(f"Delete job '{job.name}'? This cannot be undone.", _do_delete)
-            )
+    def _confirm_delete(self, job) -> None:
+        """Destructive: require explicit confirmation before removing a job."""
+
+        def _do_delete(confirmed: bool) -> None:
+            if not confirmed:
+                return
+            jobs = load_jobs(self.config_dir)
+            save_jobs(remove_job(jobs, job.id), self.config_dir)
+            self.refresh_jobs()
+
+        self.app.push_screen(
+            _ConfirmScreen(f"Delete job '{job.name}'? This cannot be undone.", _do_delete)
+        )
 
     def _open_history(self, jobs: list, index: int) -> None:
         if not jobs:

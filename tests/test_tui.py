@@ -239,6 +239,28 @@ async def test_main_menu_delete_cancel_keeps_job(tmp_config, tmp_data, sample_tr
         assert len(load_jobs(tmp_config)) == 1
 
 
+async def test_main_menu_per_row_delete_button(tmp_config, tmp_data, sample_tree, dest_dir):
+    # Each job row exposes a small delete mark that removes only that job (with confirm).
+    job = BackupJob(source=str(sample_tree), destination=str(dest_dir), method="copy")
+    save_jobs([job], tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        # The per-row delete button exists with id del-<job_id>.
+        del_btn = app.screen.query_one(f"#del-{job.id}", Button)
+        assert del_btn is not None
+        del_btn.press()
+        await pilot.pause()
+        from abackup.tui.screens.main_menu import _ConfirmScreen
+
+        assert isinstance(app.screen, _ConfirmScreen)
+        await pilot.click("#yes")
+        await pilot.pause()
+        assert load_jobs(tmp_config) == []
+
+
 async def test_main_menu_run_button(tmp_config, tmp_data, sample_tree, dest_dir):
     job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
     save_jobs([job], tmp_config)
