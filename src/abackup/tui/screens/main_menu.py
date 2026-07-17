@@ -139,7 +139,7 @@ class MainMenuScreen(Screen):
             self.query_one(f"#{button_id}", Button).disabled = not (has_jobs and has_selection)
         self.query_one("#export", Button).disabled = not has_jobs
 
-    def refresh_jobs(self) -> None:
+    def refresh_jobs(self, auto_select: bool = True) -> None:
         jobs = load_jobs(self.config_dir)
         list_view = self.query_one("#jobs", ListView)
         list_view.clear()
@@ -149,10 +149,15 @@ class MainMenuScreen(Screen):
                 Button("✕", id=f"del-{j.id}", variant="error", classes="job_delete"),
             )
             list_view.append(ListItem(row))
-        # Ensure a default selection when jobs exist so action buttons are
-        # enabled; with no jobs the list has no selection (buttons disabled).
-        if jobs:
+        if jobs and auto_select:
+            # Initial load / returning to the menu: highlight the first row so
+            # the action buttons are usable without an extra click.
             list_view.index = 0
+        else:
+            # No forced selection (e.g. after deleting a job): leave the list
+            # unselected so run/history/delete stay inactive until the user
+            # explicitly focuses a row.
+            list_view.index = None
         status = self.query_one("#status", Static)
         status.update("No jobs yet. Add one." if not jobs else "")
         self._update_button_states(jobs)
@@ -240,7 +245,9 @@ class MainMenuScreen(Screen):
                 return
             jobs = load_jobs(self.config_dir)
             save_jobs(remove_job(jobs, job.id), self.config_dir)
-            self.refresh_jobs()
+            # Do not auto-select a row afterwards: leave the list unselected so
+            # run/history/delete stay inactive until the user picks a job.
+            self.refresh_jobs(auto_select=False)
 
         self.app.push_screen(
             _ConfirmScreen(f"Delete job '{job.name}'? This cannot be undone.", _do_delete)

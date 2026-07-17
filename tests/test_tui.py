@@ -310,6 +310,42 @@ async def test_main_menu_action_buttons_disabled_after_deleting_only_job(tmp_con
         assert app.screen.query_one("#import", Button).disabled is False
 
 
+async def test_main_menu_buttons_inactive_after_delete_with_remaining(tmp_config, tmp_data, sample_tree, dest_dir):
+    # User expectation: after deleting a job, run/history/delete must stay
+    # inactive until a row is explicitly selected again (even if jobs remain).
+    jobs = [
+        BackupJob(source=str(sample_tree), destination=str(dest_dir / "a"), method="copy", name="a"),
+        BackupJob(source=str(sample_tree), destination=str(dest_dir / "b"), method="copy", name="b"),
+    ]
+    save_jobs(jobs, tmp_config)
+    save_settings(Settings(), tmp_config)
+
+    app = ABackupApp(config_dir=tmp_config, data_dir=tmp_data)
+    async with app.run_test() as pilot:
+        assert isinstance(app.screen, MainMenuScreen)
+        # Initially the first row is auto-selected -> buttons enabled.
+        assert app.screen.query_one("#delete", Button).disabled is False
+        # Delete the first job via its per-row mark.
+        app.screen.query_one(f"#del-{jobs[0].id}", Button).press()
+        await pilot.pause()
+        from abackup.tui.screens.main_menu import _ConfirmScreen
+
+        assert isinstance(app.screen, _ConfirmScreen)
+        await pilot.click("#yes")
+        await pilot.pause()
+        # One job remains, but nothing is selected -> action buttons inactive.
+        assert len(load_jobs(tmp_config)) == 1
+        assert app.screen.query_one("#run", Button).disabled is True
+        assert app.screen.query_one("#history", Button).disabled is True
+        assert app.screen.query_one("#delete", Button).disabled is True
+        assert app.screen.query_one("#export", Button).disabled is False
+        # Selecting the remaining row re-enables the action buttons.
+        app.screen.query_one("#jobs", ListView).index = 0
+        await pilot.pause()
+        assert app.screen.query_one("#run", Button).disabled is False
+        assert app.screen.query_one("#delete", Button).disabled is False
+
+
 async def test_main_menu_run_button(tmp_config, tmp_data, sample_tree, dest_dir):
     job = BackupJob(source=str(sample_tree), destination=str(dest_dir / "out"), method="copy")
     save_jobs([job], tmp_config)
