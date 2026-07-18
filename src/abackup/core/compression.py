@@ -99,7 +99,9 @@ def _seven_zip_registry_paths() -> list[str]:
             with winreg.OpenKey(hive, subkey) as key:
                 value, _ = winreg.QueryValueEx(key, "Path")
         except OSError as exc:
-            logger.warning("7-Zip registry key absent %s\\%s: %s", hive, subkey, exc)
+            # Registry lookup is best-effort discovery; a missing key is
+            # expected on most machines and not worth surfacing to the user.
+            logger.debug("7-Zip registry key absent %s\\%s: %s", hive, subkey, exc)
         if value:
             found.append(str(value))
     # De-duplicate while preserving order.
