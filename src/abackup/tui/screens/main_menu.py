@@ -51,16 +51,19 @@ class MainMenuScreen(Screen):
     /* Each job row: label fills the row, delete mark sits at the right. */
     ListItem > Horizontal {
         height: auto;
+        align: left middle;
     }
     .job_label {
         width: 1fr;
         padding: 0 1;
+        content-align: left middle;
     }
     .job_delete {
         min-width: 4;
         width: 4;
         padding: 0;
         margin: 0 0 0 1;
+        content-align: center middle;
     }
     /* Highlight the keyboard-selected job (NTH-002). */
     ListItem:focus {
