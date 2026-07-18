@@ -363,6 +363,19 @@ def test_portable_runs_copy_and_exits_0(sample_tree, tmp_path, capsys):
     assert str(sample_tree) in out
 
 
+def test_portable_shows_live_progress(sample_tree, tmp_path, capsys):
+    # The console must show in-progress feedback (a percent bar), not only the
+    # final result line, so the user can watch the backup advance.
+    dst = tmp_path / "dst"
+    with pytest.raises(SystemExit) as exc:
+        main(["--source", str(sample_tree), "--destination", str(dst), "--method", "copy"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    # Live progress renders an in-place "[copy] NN%" bar during the run.
+    assert "[copy]" in out
+    assert "%" in out
+
+
 def test_portable_runs_zip_and_exits_0(sample_tree, tmp_path):
     dst = tmp_path / "dst"
     with pytest.raises(SystemExit) as exc:

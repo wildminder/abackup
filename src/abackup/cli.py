@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 
 from abackup import __version__
 from abackup.config import (
@@ -16,6 +17,7 @@ from abackup.config import (
 from abackup.core.backup import BackupResult, format_summary, run_job
 from abackup.core.jobs import find_job_by_name
 from abackup.core.paths import get_config_dir, is_inside
+from abackup.core.progress import Progress
 from abackup.core.runner import run_jobs_batch
 from abackup.models import BackupJob, BackupMethod
 from abackup.tui.app import ABackupApp
@@ -161,6 +163,35 @@ def _run_batch(jobs, args, settings) -> list[BackupResult]:
     )
 
 
+def _make_console_progress(job) -> Callable[[Progress], None]:
+    """Build an ``on_progress`` callback that renders a live console bar.
+
+    The bar is drawn in place (carriage return) so the user sees smooth
+    progress instead of only the final result. Updates are throttled to whole
+    percent changes to avoid flooding the terminal.
+    """
+
+    last_percent = -1
+
+    def on_progress(p: Progress) -> None:
+        nonlocal last_percent
+        percent = p.percent()
+        if percent == last_percent:
+            return
+        last_percent = percent
+        mb_done = p.bytes_done / (1024 * 1024)
+        mb_total = p.bytes_total / (1024 * 1024)
+        line = (
+            f"\r[{job.method.value}] {percent:3d}% "
+            f"({p.files_done}/{p.files_total} files, {mb_done:.1f}/{mb_total:.1f} MB)"
+        )
+        # Carriage return + pad with spaces so a shorter line doesn't leave
+        # stale characters from the previous (longer) render.
+        print(line.ljust(80), end="", flush=True)
+
+    return on_progress
+
+
 def _run_portable(args) -> None:
     """Config-free one-shot backup from CLI args (portable mode).
 
@@ -208,16 +239,21 @@ def _run_portable(args) -> None:
     import tempfile
 
     data_dir = args.data_dir or tempfile.mkdtemp(prefix="abackup-portable-")
+
+    # Live console progress: render an in-place bar unless --quiet was given.
+    on_progress = _make_console_progress(job) if not args.quiet else None
     result = run_job(
         job,
         data_dir=data_dir,
         portable=True,
         dry_run=args.dry_run,
         prefer_robocopy=True,
+        on_progress=on_progress,
     )
 
     if not args.quiet:
-        print(f"{job.source} -> {job.destination} [{job.method.value}]")
+        # Clear the in-place progress line, then print the final summary.
+        print(f"\r{job.source} -> {job.destination} [{job.method.value}]")
         print(f"  {result.status}: {format_summary(result.summary)}")
     if result.status == "failed":
         print(result.error or "Backup failed.", file=sys.stderr)
