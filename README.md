@@ -1,7 +1,12 @@
 # ABackup
 
-A full-featured CLI backup application with a proper **terminal user interface (TUI)**
-built with [Textual](https://textual.textualize.io/).
+<div align="center">
+A full-featured CLI backup application with a proper **terminal user interface**
+
+<img width="80%" alt="abackup" src="https://github.com/user-attachments/assets/4121a211-7ca6-4090-870a-e35c59a0ab2d" />
+    
+</div>
+
 
 ABackup opens directly on the **main window**, which lists your backup jobs
 (showing an empty table with a "No jobs yet. Add one." hint when none exist).
