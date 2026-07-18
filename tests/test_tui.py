@@ -125,13 +125,12 @@ async def test_main_menu_shows_empty_state(tmp_config, tmp_data):
         assert "No jobs yet" in str(status.render())
         assert len(app.screen.query_one("#jobs", ListView).children) == 0
         # Job-dependent buttons are disabled until a job exists.
-        for bid in ("run", "history", "delete", "export"):
+        for bid in ("run", "history", "delete", "export", "run_all"):
             assert app.screen.query_one(f"#{bid}", Button).disabled is True
         # Import stays available even with no jobs (it bootstraps a config).
         assert app.screen.query_one("#import", Button).disabled is False
         # Unrelated actions remain available.
         assert app.screen.query_one("#add", Button).disabled is False
-        assert app.screen.query_one("#run_all", Button).disabled is False
 
 
 async def test_main_menu_buttons_enabled_when_job_exists(tmp_config, tmp_data, sample_tree, dest_dir):
@@ -307,6 +306,7 @@ async def test_main_menu_action_buttons_disabled_after_deleting_only_job(tmp_con
         assert app.screen.query_one("#history", Button).disabled is True
         assert app.screen.query_one("#delete", Button).disabled is True
         assert app.screen.query_one("#export", Button).disabled is True
+        assert app.screen.query_one("#run_all", Button).disabled is True
         assert app.screen.query_one("#import", Button).disabled is False
 
 

@@ -128,16 +128,17 @@ class MainMenuScreen(Screen):
         """Enable job-dependent buttons based on jobs and current selection.
 
         run/history/delete act on the *selected* job, so they require both
-        jobs to exist and a focused list entry. Export acts on all jobs, so it
-        only needs jobs to exist. Import stays available (bootstraps an empty
-        config).
+        jobs to exist and a focused list entry. run_all and export act on all
+        jobs, so they only need jobs to exist. Import stays available
+        (bootstraps an empty config).
         """
         has_jobs = bool(jobs)
         list_view = self.query_one("#jobs", ListView)
         has_selection = list_view.index is not None
         for button_id in ("run", "history", "delete"):
             self.query_one(f"#{button_id}", Button).disabled = not (has_jobs and has_selection)
-        self.query_one("#export", Button).disabled = not has_jobs
+        for button_id in ("run_all", "export"):
+            self.query_one(f"#{button_id}", Button).disabled = not has_jobs
 
     def refresh_jobs(self, auto_select: bool = True) -> None:
         jobs = load_jobs(self.config_dir)
