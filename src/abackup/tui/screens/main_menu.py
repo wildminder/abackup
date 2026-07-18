@@ -36,6 +36,10 @@ class _ConfirmScreen(ModalScreen[bool]):
 
 class MainMenuScreen(Screen):
     CSS = """
+    #title {
+        padding: 1 0 1 0;
+        text-style: bold;
+    }
     #key_help {
         padding: 0 1;
         color: $text-muted;

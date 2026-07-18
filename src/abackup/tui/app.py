@@ -38,6 +38,7 @@ class ABackupApp(App):
         data_dir: str | Path | None = None,
     ) -> None:
         super().__init__()
+        self.title = "ABackup"
         self.config_dir = config_dir
         self.data_dir = data_dir
         self.theme_name = "dark"
