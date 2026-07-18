@@ -35,25 +35,25 @@ class RunJobScreen(Screen):
         yield Button("Back", id="back")
 
     def on_mount(self) -> None:
-        self._worker = self.run_worker(self._run())
+        # Run on a *thread* worker: run_job() is a blocking call, so executing
+        # it off the event loop keeps the UI responsive and lets the
+        # on_progress callback marshal live updates back via call_from_thread.
+        self._worker = self.run_worker(self._run, thread=True)
 
-    async def _run(self) -> None:
+    def _run(self) -> None:
         def on_progress(p: Progress) -> None:
-            self.query_one("#progress", ProgressBar).update(progress=p.percent())
-            self.query_one("#current", Static).update(
-                f"Current: {shorten_path(p.current_file, self.job.source)}" if p.current_file else ""
-            )
-            mb_done = p.bytes_done / (1024 * 1024)
-            mb_total = p.bytes_total / (1024 * 1024)
-            self.query_one("#counts", Static).update(
-                f"Files {p.files_done}/{p.files_total} · {mb_done:.1f}/{mb_total:.1f} MB"
-            )
+            # run_job() runs synchronously inside this worker thread, so the
+            # callback fires off the event loop. Marshal UI updates back onto
+            # the event loop so the progress bar/current-file update live.
+            self.app.call_from_thread(self._render_progress, p)
 
         settings = load_settings(self.config_dir)
         # RM-11: advisory low-free-space warning before the run starts.
         warning = check_free_space(self.job)
         if warning:
-            self.query_one("#warning", Static).update(f"⚠ {warning}")
+            self.app.call_from_thread(
+                self.query_one("#warning", Static).update, f"⚠ {warning}"
+            )
         result = run_job(
             self.job,
             config_dir=self.config_dir,
@@ -63,6 +63,22 @@ class RunJobScreen(Screen):
             dry_run=self.dry_run,
             on_progress=on_progress,
         )
+        # run_job() returns on this worker thread; marshal the final render
+        # (progress=100 + result) onto the event loop so it paints correctly.
+        self.app.call_from_thread(self._render_result, result, settings)
+
+    def _render_progress(self, p: Progress) -> None:
+        self.query_one("#progress", ProgressBar).update(progress=p.percent())
+        self.query_one("#current", Static).update(
+            f"Current: {shorten_path(p.current_file, self.job.source)}" if p.current_file else ""
+        )
+        mb_done = p.bytes_done / (1024 * 1024)
+        mb_total = p.bytes_total / (1024 * 1024)
+        self.query_one("#counts", Static).update(
+            f"Files {p.files_done}/{p.files_total} · {mb_done:.1f}/{mb_total:.1f} MB"
+        )
+
+    def _render_result(self, result, settings) -> None:
         self.query_one("#progress", ProgressBar).update(progress=100)
         suffix = " (dry run — nothing written)" if self.dry_run else ""
         summary_text = format_summary(result.summary)
