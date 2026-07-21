@@ -1,51 +1,70 @@
-# ABackup
-
 <div align="center">
-A full-featured CLI backup application with a proper **terminal user interface**
 
-<img width="80%" alt="abackup" src="https://github.com/user-attachments/assets/4121a211-7ca6-4090-870a-e35c59a0ab2d" />
+# 「 ABackup 」
+
+A terminal-based backup utility featuring an interactive console user interface and CLI automation.
+
+<img width="90%" alt="ABackup TUI main job list" src="https://github.com/user-attachments/assets/4121a211-7ca6-4090-870a-e35c59a0ab2d" />
+
+<p>
     
+[![Python](https://img.shields.io/badge/Python-3.11+-3670A0?style=flat-square&logo=python&logoColor=ffdd54)](https://www.python.org)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-6c757d?style=flat-square)](#)
+[![License](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](#)
+
+</p>
 </div>
 
 
-ABackup opens directly on the **main window**, which lists your backup jobs
-(showing an empty table with a "No jobs yet. Add one." hint when none exist).
-Use **Add job** to create a job; the add-job form interactively asks for:
+## ❯ Overview
 
-1. **Source folder** — the local folder to back up.
-2. **Destination folder** — where backups are written.
-3. **Method** — how to back up:
-    - **Direct copy** — mirrors the source tree into the destination.
-    - **Zip archive** — creates `<source_name>_<YYYY-MM-DD>.zip` in the destination
-      using Python's `zipfile` (fast, deterministic, no external dependency).
-    - **7z archive** — creates `<source_name>_<YYYY-MM-DD>.7z` (LZMA2) in the
-      destination. Compresses better than zip. By default the app **auto-detects**
-      the installed [7-Zip](https://www.7-zip.org/) binary (via the Windows
-      registry and `PATH`; override with `SEVEN_ZIP_PATH`) and uses it — it is
-      multithreaded and typically 5–10× faster than the pure-Python **py7zr**
-       fallback. Enable *Prefer py7zr* in Settings to force the py7zr library.
-       7z jobs report **live progress** derived from the growing archive file
-       size (7-Zip buffers its `-bsp2` percentage stream when piped, so the
-       bar is driven by the temp archive's growth instead), so it moves
-       smoothly during a long archive.
-      present.
+ABackup is a local backup manager designed to be self-contained and flexible. It provides a Terminal User Interface (TUI) for interactive configuration, run management, and active progress monitoring, alongside a headless Command Line Interface (CLI) tailored for automation, custom scripting, and task scheduling.
 
-Jobs and settings are stored as JSON under a config directory in your home folder
-(`Documents\abackup` on Windows, `~/abackup` elsewhere) and survive restarts.
+### Supported Engines
+‣ **Direct Copy**: Mirrors folder hierarchies locally (uses native Windows `robocopy` when available, falling back to Python-based filesystem utilities).  
+‣ **Zip Archive**: Compresses data structures to standard `.zip` files using Python’s built-in, deterministic `zipfile` module.  
+‣ **7z Archive**: Compresses data structures to `.7z` archives. It prioritizes the multithreaded system-installed 7-Zip binary (automatically resolved via system `PATH` or registry) and falls back to the pure-Python `py7zr` library.
 
-## Install
+<p align="center">┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈</p>
+
+## ❯ Features & Safeguards
+
+### Transfer Reporting
+‣ **Byte-Level Progression**: Scans directory sizing prior to transmission, driving progress bars by relative data volume rather than file count steps.  
+‣ **TUI Counters**: Live display monitors active targets, aggregate transfer progress, relative paths, and size footprints.  
+‣ **Thread Control**: Cancellation requests are captured immediately between block read loops to terminate jobs and minimize lingering artifacts.
+
+### Adjustments & Engines
+‣ **Zip Tuning**: Compression ratios range from `0` (no compression) to `9` (maximum).  
+‣ **7z Customizations**: Configurable LZMA2 compression parameters (`0-9`) coupled with py7zr engine overrides.  
+‣ **Path Relativization**: Stores source paths relative to configuration targets when enabled, allowing configs to remain portable across fluctuating external storage drive letters.  
+‣ **Native Delegation**: Uses standard Windows `robocopy` utilities if available for expedited direct copy executions.
+
+### System Safety
+‣ **Per-Job Auditing**: Retains historical metrics covering execution times, durations, block counts, and exceptions inside structured logs.  
+‣ **Storage Capacity Estimation**: Verifies source size against destination capacity prior to launching transfers to prevent write failures.
+
+<p align="center">┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈</p>
+
+## ❯ Install
+
+Requires Python 3.11+.
 
 ```bash
-# from the project root (requires Python 3.11+)
-# Create and activate a virtual environment first, e.g.:
-#   python -m venv .venv && source .venv/bin/activate   # Linux/macOS
-#   python -m venv .venv && .venv\Scripts\activate      # Windows
+# Create and activate virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+# or .venv\Scripts\activate on Windows
+
+# Install package
 uv pip install -e .
 ```
 
-## Usage
+<p align="center">┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈</p>
 
-Launch the app (opens the TUI):
+## ❯ Usage
+
+Launch the terminal interface:
 
 ```bash
 abackup
@@ -53,81 +72,74 @@ abackup
 python -m abackup
 ```
 
-### Command-line flags
+### CLI Command Flags
 
 | Flag | Description |
-|------|-------------|
-| `--version` | Print version and exit. |
-| `--config-dir DIR` | Override the config directory (useful for portable / automated use). |
-| `--data-dir DIR` | Override the data directory (logs, manifests). |
-| `--run-all` | Run every configured job non-interactively and print a summary (requires `--config-dir`). |
-| `--run-due` | Like `--run-all`, but only jobs whose schedule is currently due (requires `--config-dir`). |
-| `--run NAME` | Run a single job by name non-interactively; exit code reflects the result (requires `--config-dir`). |
-| `--list-jobs` | Print all configured jobs (name, method, source → destination) and exit. |
-| `--tag TAG` | With `--run-all`/`--run-due`, only run jobs carrying this tag. |
-| `--workers N` | Number of concurrent backup workers for `--run-all` (default: `max_workers` setting). |
-| `--dry-run` | With any run flag, plan the backup without writing anything. |
-| `--export PATH` | Export all jobs + settings to a portable JSON file at `PATH`. |
-| `--import PATH` | Import jobs + settings from a portable JSON file at `PATH`. |
-| `--merge` | With `--import`, merge imported jobs into existing ones (by id) instead of overwriting. |
-| `--show-settings` | Print the resolved config directory and current settings as JSON, then exit. |
+| :--- | :--- |
+| `--version` | Display application version and exit. |
+| `--config-dir DIR` | Override default configuration directory location. |
+| `--data-dir DIR` | Override directory where logs and manifests are written. |
+| `--run-all` | Execute all saved jobs in headless mode (requires `--config-dir`). |
+| `--run-due` | Execute only scheduled, due jobs (requires `--config-dir`). |
+| `--run NAME` | Execute a single target job by name. |
+| `--list-jobs` | List configured jobs and targets without execution. |
+| `--tag TAG` | Filter target execution tasks by tag. |
+| `--workers N` | Set the max concurrent worker thread pool. |
+| `--dry-run` | Compute jobs and schedules without performing disk writes. |
+| `--export PATH` | Export all jobs and settings to a JSON file. |
+| `--import PATH` | Import configurations from a backup JSON. |
+| `--merge` | Prevent overwriting existing configurations during import. |
+| `--show-settings` | Output currently loaded settings configurations as JSON. |
 
-Example (portable / automated):
-
+*Examples:*
 ```bash
-abackup --config-dir ./my-config --data-dir ./my-data
-abackup --run-all --config-dir ./my-config --workers 4
-abackup --run "Documents" --config-dir ./my-config   # single job, headless
+# Execute single named job
+abackup --run "Documents" --config-dir ./my-config
+
+# Execute all due tasks with 4 concurrent threads
+abackup --run-due --config-dir ./my-config --workers 4
+
+# Export portable settings
 abackup --export ./portable.json --config-dir ./my-config
-abackup --import ./portable.json --config-dir ./other-machine
 ```
-
-### Running all jobs
-
-- In the TUI, use the **Run all** button on the main menu to back up every job
-  concurrently (progress + per-job results are shown on the run-all screen).
-- From the CLI, `abackup --run-all --config-dir DIR` runs all jobs and prints a
-  summary without opening the terminal UI.
 
 ### Headless / scheduled runs
 
-ABackup can run entirely from the command line, which makes it suitable for
-`cron` / Windows Task Scheduler integration without launching the TUI:
+* `--run NAME --config-dir DIR` — run one job and exit.
+* `--run-all --config-dir DIR` — run every job; `--run-due` restricts to due jobs.
+* `--tag TAG` — limit a batch to jobs carrying that tag.
+* `--list-jobs` — enumerate jobs for wrapper scripts.
 
-- `abackup --run NAME --config-dir DIR` runs a single named job and exits.
-- `abackup --run-all --config-dir DIR` runs every job; `--run-due` restricts the
-  batch to jobs whose schedule is currently due.
-- `--tag TAG` limits a batch to jobs carrying that tag.
-- `--list-jobs` prints the configured jobs so a wrapper script can enumerate them.
+A missing job name or malformed import file exits non-zero with a message on stderr/stdout.
 
-The process exit code reflects the outcome of a run:
+### Portable config (export / import)
 
-| Exit code | Meaning |
-|-----------|---------|
-| `0` | All jobs succeeded. |
-| `1` | At least one job failed. |
-| `2` | At least one job was cancelled (e.g. via the Cancel button in the TUI). |
+* **Export:** `abackup --export portable.json --config-dir DIR` writes jobs + settings to one JSON file. Also in the TUI: **Main menu → Export config / Import config**.
+* **Import:** `abackup --import portable.json --config-dir DIR` replaces the target config. Add `--merge` to combine by id instead of overwriting.
 
-A missing job name (`--run nope`) or a malformed import file exits non-zero with
-a descriptive message on stderr/stdout.
+With **Store paths relative to config directory** enabled, source/destination paths are saved relative to the config dir and re-expanded on load — so a config copied across drives or mount points still resolves. Paths outside the config dir are always stored absolute.
 
-### Portable one-shot backup (no config files)
+### Concurrency & cancellation
 
-For a quick, fully portable backup you can supply the source, destination and
-method directly on the command line. ABackup builds the job **in memory** and
-writes **no config files** (no `jobs.json` / `settings.json` are created or read):
+Jobs run on a bounded worker thread pool fed from a queue. Worker count: `max_workers` (default `4`) or `--workers`. A failing job doesn't stop the others; each job's status is persisted.
+
+**Cancel** aborts all jobs via a shared event that copy/zip routines check between (and for copies, during) files. In-flight jobs stop promptly; queued jobs are marked `cancelled`. The summary reports succeeded / failed / cancelled counts.
+
+<p align="center">┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈</p>
+
+## ❯ Portable one-shot backup
+
+Skip config files entirely — supply source, destination and method on the command line. The job is built in memory; no `jobs.json` or `settings.json` is created or read.
 
 ```bash
-abackup --source C:\Users\me\Documents --destination D:\Backups\docs --method copy
+abackup --source C:\Users\me\Documents --destination D:\Backups\docs   --method copy
 abackup --source C:\Users\me\Photos  --destination D:\Backups\photos --method zip
-abackup --source C:\Users\me\Data   --destination D:\Backups\data  --method 7z
+abackup --source C:\Users\me\Data    --destination D:\Backups\data   --method 7z
 ```
-
-Options:
 
 | Flag | Meaning |
 |------|---------|
-| `--source DIR` | Source folder to back up (required). |
+| `--source DIR` | Source folder (required). |
 | `--destination DIR` | Destination folder (required). |
 | `--method {copy,zip,7z}` | Backup method (required). |
 | `--name NAME` | Display name only (not persisted). |
@@ -136,157 +148,91 @@ Options:
 | `--stamp` | Write into a timestamped subfolder of the destination. |
 | `--dry-run` | Plan only; write nothing. |
 | `--quiet` | Suppress progress/summary output (exit code still set). |
-| `--data-dir DIR` | Optional: where best-effort logs go (defaults to a temp dir). |
+| `--data-dir DIR` | Optional best-effort log location (defaults to a temp dir). |
 
-The backup is **atomic**: a copy is staged in a temp directory and only moved
-into place on success; archive methods write to a temp file and replace the
-final archive atomically. On failure no partial artifacts are left behind, and
-the run exits non-zero.
-
-Exit codes for portable mode:
-
-| Exit code | Meaning |
-|-----------|---------|
+| Exit | Meaning |
+|----:|---------|
 | `0` | Backup succeeded. |
 | `1` | Backup failed (e.g. destination is an existing file). |
-| `2` | Invalid usage (missing/invalid args, source missing, destination inside source). |
+| `2` | Invalid usage (missing args, source missing, destination inside source). |
 
-### Portable config (export / import)
+<p align="center">┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈</p>
 
-You can replicate an entire setup on another machine without re-entering jobs:
+## ❯ Run history & safety
 
-- **Export:** `abackup --export portable.json --config-dir DIR` writes all jobs
-  and settings to a single JSON file. The same action is available in the TUI via
-  **Main menu → Export config** / **Import config**.
-- **Import:** `abackup --import portable.json --config-dir DIR` replaces the
-  target config's jobs + settings. Add `--merge` to combine imported jobs with
-  the existing ones (matched by job id) instead of overwriting.
+* **Per-job history** — each run records timestamp, duration, file count, size, success/failure. Browse via the **History** screen.
+* **Persistent log** — append-only human-readable log next to the config, for diagnosing failures outside the TUI.
+* **Subfolder stamping** — write each backup into `destination/<YYYY-MM-DD_HHMMSS>/` so runs coexist without overwriting.
+* **Free-space check** — warns before a run if the destination has insufficient space (never blocks).
 
-When **Store paths relative to config directory** is enabled in Settings, source
-and destination paths are saved relative to the config directory. On load they
-are re-expanded to absolute paths, so a config copied to a machine with a
-different drive letter or mount point still resolves correctly. Paths that live
-outside the config directory are always stored as absolute.
+<p align="center">┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈</p>
 
-Jobs run concurrently via a bounded pool of worker threads fed from a queue, so a
-large number of jobs is processed with bounded memory. The worker count is
-controlled by the `max_workers` setting (default `4`) or the `--workers` flag. A
-failing job never stops the others, and each job's status is persisted.
+## ❯ Storage layout
 
-While a batch runs you can press **Cancel** to abort *all* jobs. The request is
-signalled through a shared event that the copy/zip routines check between (and,
-for copies, during) files, so in-flight jobs stop promptly and any queued jobs
-are marked `cancelled` without running. The summary reports how many jobs
-succeeded, failed, and were cancelled.
+Configuration parameters resolve defaults to `Documents\abackup` on Windows systems, and `~/abackup` on POSIX systems.
 
-### Realtime progress
+```text
+<config-dir>/
+├── settings.json              # Global program defaults
+├── jobs.json                  # Defined execution jobs
+├── logs/
+│   ├── abackup.log            # Aggregated activity log
+│   └── <job_id>.jsonl         # Individual job terminal logs
+├── history/
+│   └── <job_id>.jsonl         # Append-only run histories
+└── manifests/
+    └── <job_id>.json          # Files manifest indexing
+```
 
-Both backup methods report progress **in real time** so you can watch a job as
-it runs:
+<p align="center">┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈</p>
 
-- **Byte-level progress** — the source tree is pre-scanned to compute the total
-  size, then each 1 MiB chunk updates the progress bar smoothly (no more
-  "0% → 100%" jumps on large files).
-- **Current file + counts** — the run-job screen shows the file being copied or
-  zipped plus `Files N/M · X/Y MB`. Paths are displayed **relative to the backup
-  source** (and elided in the middle if still long), so the UI stays compact
-  instead of showing long absolute paths.
-- **Per-job + overall** — the run-all screen shows an aggregate overall bar
-  (summed bytes across all concurrent jobs) and a live line per job with its
-  percentage and current file.
+## ❯ Settings
 
-Progress is emitted from the worker threads and marshalled onto the UI thread,
-so it never blocks cancellation: pressing **Cancel** still aborts all jobs
-promptly.
-
-### Settings
-
-Open the **Settings** screen from the main menu to tune global options:
-
-- **Storage location** — the config directory. Changing it moves all existing data
-  (jobs, settings, logs) to the new location atomically.
-  - **Zip compression level** — `0` (store, no compression) to `9` (max). Default `6`.
-    Applies to the `zip` backup method.
-  - **7z compression level** — `0` (copy, no compression) to `9` (ultra). Default `3`
-    (fast). Sets the LZMA2 `preset` for the **7z** backup method: `0` = copy,
-    `1` = fastest, `3` = fast, `5` = normal, `7` = maximum, `9` = ultra. This is
-    independent of the Zip level above.
-  - **Prefer py7zr** — controls the engine used for **7z** jobs. Disabled by
-    default, so 7z jobs use the **multithreaded, much faster** system
-    [7-Zip](https://www.7-zip.org/) binary when installed (typically 5–10×
-    quicker than the Python path). The binary is located automatically via the
-    Windows registry and `PATH`; set `SEVEN_ZIP_PATH` if it lives elsewhere.
-    Enable this option to force the pure-Python **py7zr** library instead
-    (portable fallback; single-threaded and non-solid, so much
-    slower on large trees). The **Zip archive** method is unaffected and
-    always uses Python's `zipfile`.
-- **Max workers** — default number of concurrent jobs for *Run all jobs*.
-- **Default destination** — pre-filled destination for new jobs.
-- **Log level** — `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
-- **Notify on finish** — show a desktop notification when a batch of jobs
-  completes (uses `plyer` when available, otherwise a best-effort OS call).
-- **Sound on failure** — play a short system beep if any job in a run fails.
-- **Prefer robocopy (Windows)** — when enabled (the default) and `robocopy.exe`
-  is available, the **copy** backup method delegates to the native Windows
-  `robocopy` for faster, more resilient mirroring. On other platforms, or if
-  `robocopy` is missing, ABackup automatically falls back to its built-in
-  Python engine. Disable this to always use the Python engine.
-
-You can also inspect the resolved config directory and current settings non-interactively:
+* **Storage location** — config directory. Changing it moves all data (jobs, settings, logs) atomically.
+* **Zip compression level** — `0`–`9`, default `6`. Zip method only.
+* **7z compression level** — `0`–`9`, default `3`. Sets LZMA2 `preset`: `0`=copy, `1`=fastest, `3`=fast, `5`=normal, `7`=max, `9`=ultra. Independent of Zip level.
+* **Prefer py7zr** — forces the pure-Python `py7zr` engine for 7z jobs (single-threaded, non-solid, slower). Default off → uses the multithreaded system 7-Zip binary (auto-detected; `SEVEN_ZIP_PATH` override). Zip method is unaffected.
+* **Max workers** — default concurrent jobs for *Run all*.
+* **Default destination** — pre-filled destination for new jobs.
+* **Log level** — `DEBUG` · `INFO` · `WARNING` · `ERROR` · `CRITICAL`.
+* **Notify on finish** — desktop notification on batch completion (`plyer`, best-effort).
+* **Sound on failure** — system beep if any job in a run fails.
+* **Prefer robocopy (Windows)** — default on: copy method delegates to `robocopy.exe` when present. Fallback to the Python engine otherwise. Disable to force Python.
 
 ```bash
 python -m abackup --show-settings
-# => {"config_dir": "...", "zip_compression_level": 6, "seven_zip_compression_level": 3, "max_workers": 4, ...}
+# => {"config_dir": "...", "zip_compression_level": 6,
+#     "seven_zip_compression_level": 3, "max_workers": 4, ...}
 ```
 
-### Run history & safety
+<p align="center">┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈</p>
 
-- **Per-job run history** — every run records timestamp, duration, file count,
-  size, and success/failure. Open the **History** screen from the main menu to
-  browse past runs for a job.
-- **Persistent log file** — a human-readable append-only log is written next to
-  the config so failures can be diagnosed outside the TUI.
-- **Subfolder stamping** — enable *Subfolder stamping* on a job to write each
-  backup into `destination/<YYYY-MM-DD_HHMMSS>/` so multiple runs coexist without
-  overwriting each other.
-- **Free-space check** — before a run starts, ABackup estimates the source tree
-  size and shows a warning if the destination has insufficient free space (it
-  never blocks the run).
+## ❯ Development & tests
 
-## Storage
-
-`<config>` defaults to `Documents\abackup` on Windows and `~/abackup` elsewhere
-(overridable with `--config-dir` or the Settings screen). `<data>` defaults to
-`<config>` unless `--data-dir` is given.
-
-- **Settings:** `<config>/settings.json` (global defaults).
-- **Jobs:** `<config>/jobs.json` (array of backup jobs).
-- **Run logs:** `<data>/logs/<job_id>.jsonl`.
-- **Shared log:** `<data>/logs/abackup.log` (all runs aggregated; the only log file at the data root is under `logs/`).
-- **Run history:** `<data>/history/<job_id>.jsonl` (append-only per-job history).
-- **Manifests:** `<data>/manifests/<job_id>.json`.
-
-All writes are atomic (temp file + `os.replace`).
-
-## Development & tests
+Execute tests inside an active virtual environment:
 
 ```bash
-# Activate your virtual environment first (see Install section), then:
+# Install testing dependencies
 uv pip install -e ".[dev]"
+
+# Execute unit-tests
 pytest
-# with coverage gate
+
+# Execute coverage threshold verification
 pytest --cov=src/abackup --cov-fail-under=90
 ```
 
-## Architecture
+<p align="center">┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈ ┈</p>
 
-- `abackup/core/*` — framework-agnostic, fully unit-tested backup logic.
-- `abackup/models.py` — `Settings` / `BackupJob` / `BackupMethod`.
-- `abackup/config.py` — atomic JSON persistence.
-- `abackup/tui/*` — Textual screens (add-job wizard, main menu, run-job).
-- `abackup/cli.py` — entry point and flags.
+## ❯ Architecture
 
-Determinism: timestamps are injectable, IDs use `uuid5` (not random), and the
-built-in `zip` output is byte-reproducible. Note that 7-Zip (`.7z`) archives are
-*not* byte-reproducible — if you need deterministic output, use the **Zip
-archive** method (or set `prefer_py7zr = false` to avoid the py7zr engine).
+The system is split into distinct modules:
+
+```text
+abackup/
+├── core/          # Main backup, archive, and transfer implementations
+├── tui/           # Console UI layouts, widgets, and user prompts
+├── cli.py         # Argument translation and automation flow logic
+├── config.py      # Core input validation and disk persistency controllers
+└── models.py      # Structured system configuration objects
+```
